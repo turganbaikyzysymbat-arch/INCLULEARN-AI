@@ -749,3 +749,9 @@ body{font-size:16px!important;color:#242238!important;background:#fbf9fd!importa
         flex-direction: column;
     }
 }
+
+/* Normal text inside material title and topic fields */
+.material-input-card input {
+    font-weight: 400 !important;
+    font-size: 15px !important;
+}
