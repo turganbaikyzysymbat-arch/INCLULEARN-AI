@@ -19,19 +19,6 @@
     <button onclick="document.body.classList.toggle('focus-mode')">◎ Назар режимі</button>
 </div>
 
-{% if session.role in ('teacher', 'admin') %}
-<div class="surface-card" style="margin-bottom:20px;padding:20px">
-    <h3>Оқушыға тапсырма ретінде жіберу</h3>
-    <form method="POST" action="{{ url_for('assign', mid=m.id) }}">
-        <label>Сынып немесе топ</label>
-        <input type="text" name="class_name" placeholder="Мысалы: 7А" required>
-        <label>Бағалау критерийлері</label>
-        <textarea name="criteria" placeholder="Бағалау критерийлерін енгізіңіз"></textarea>
-        <button class="primary-btn" type="submit">Оқушыға жіберу</button>
-    </form>
-</div>
-{% endif %}
-
 <article class="reader-card">
     <div class="reader-meta">
         <span class="ready-chip">
