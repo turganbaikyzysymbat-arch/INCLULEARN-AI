@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-title studio-title"><div><div class="eyebrow">INCLULEARN AI · ADAPTATION STUDIO</div><h1>AI бейімдеу студиясы</h1><p>Материалды қосыңыз және оқушыға қажет қолдау түрлерін таңдаңыз.</p></div><span class="step-chip">01 — 02 <small>Бейімдеу параметрлері</small></span></section>
+<form class="adapt-workspace" method="post" enctype="multipart/form-data">
+<section class="surface-card material-input-card">
+<div class="card-heading"><span class="step-number">01</span><div><h2>Материалды қосыңыз</h2><p>Мәтін енгізіңіз немесе құжат жүктеңіз.</p></div></div>
+<div class="field-grid">
+<label>Материал атауы<input name="title" placeholder="Мысалы: Python тіліндегі циклдер" required></label>
+<label>Сынып<select name="grade">{% for i in range(1,12) %}<option value="{{i}}" {% if i==7 %}selected{% endif %}>{{i}}-сынып</option>{% endfor %}</select></label>
+<label>Пән<select name="subject">{% for s in subjects %}<option>{{s}}</option>{% endfor %}</select></label>
+<label>Тақырып<input name="topic" placeholder="Тақырып атауы"></label></div>
+<div class="upload-zone" id="uploadZone">
+  <input id="materialFile" type="file" name="file" accept=".pdf,.docx,.txt">
+  <span class="upload-symbol">↑</span>
+  <b>Файлды осында сүйреп әкеліңіз</b>
+  <small>PDF · DOCX · TXT · 12 MB дейін</small>
+  <label class="file-pick-btn" for="materialFile">Файлды таңдау</label>
+  <span class="selected-file" id="selectedFile">Файл таңдалмаған</span>
+</div>
+<div class="input-divider"><span>немесе мәтінді қойыңыз</span></div>
+<label class="full-field material-text-label"><textarea name="content" rows="8" placeholder="Оқу мәтінін, түсіндірмені немесе тапсырманы осында енгізіңіз..."></textarea></label>
+<div class="material-hint">Материал мәтінін енгізіңіз немесе файл жүктеңіз.</div></section>
+<section class="surface-card needs-card needs-right-card">
+<div class="card-heading needs-heading"><span class="step-number step-color">02</span><div><h2>Оқушыға бейімдеңіз</h2><p>Бірнеше қолдау түрін қатар таңдауға болады.</p></div></div>
+<div class="needs-count-line"><b id="needsCount">0</b><span>түрі таңдалды</span></div>
+{% set needs = [('Aa','Жеңілдетілген мәтін','Қарапайым тіл мен қысқа сөйлемдер','need-peach'),('1·2·3','Қадамдық түсіндіру','Ретімен берілген нұсқаулық','need-sky'),('✦','Қосымша мысалдар','Өмірмен байланысты мысалдар','need-lilac'),('⌘','Визуалды тірек','Негізгі ұғымдардың байланысы','need-mint'),('◉','Аудио нұсқа','Тыңдап оқу мүмкіндігі','need-aqua'),('A+','Үлкейтілген қаріп','Оқуға ыңғайлы мәтін','need-lemon'),('≡','Қысқаша резюме','Ең маңызды ойлар ғана','need-coral'),('✓','Бейімделген тапсырмалар','Деңгейі реттелген тапсырмалар','need-violet')] %}
+<div class="need-grid need-grid-creative">{% for icon,title,desc,color in needs %}<label class="need-option need-option-creative {{color}}"><input type="checkbox" name="support" value="{{ ['Оқуды түсіну және мәтінді жеңілдету','Қысқа қадамдарға бөлу','Қосымша мысалдар','Визуалды тірек','Аудио нұсқа','Көру қолдауы','Қысқаша резюме','Қосымша күрделі тапсырмалар'][loop.index0] }}"><span class="need-illustration need-illustration-{{loop.index}}" aria-hidden="true"><img src="{{url_for('static',filename='images/need-' ~ loop.index ~ '.svg')}}" alt=""></span><span class="need-copy"><b>{{title}}</b><small>{{desc}}</small></span><span class="need-selected">✓</span></label>{% endfor %}</div>
+<div class="needs-footnote">Оқушының аты-жөнін немесе диагнозын енгізу қажет емес.</div>
+<button class="primary-btn adapt-submit" type="submit"><span>✦</span> Материалды бейімдеу <span>→</span></button><p class="submit-caption">Нәтиже келесі бетте көрсетіледі. Мұғалім оны тексеріп, жариялайды.</p>
+</section></form>
+<script>
+document.addEventListener('DOMContentLoaded',function(){
+ const checks=document.querySelectorAll('.need-option-creative input[type="checkbox"]');
+ const count=document.getElementById('needsCount');
+ function updateCount(){count.textContent=[...checks].filter(x=>x.checked).length}
+ checks.forEach(x=>x.addEventListener('change',updateCount));updateCount();
+ const input=document.getElementById('materialFile'),zone=document.getElementById('uploadZone'),name=document.getElementById('selectedFile');
+ function showFile(file){if(file){name.textContent=file.name;zone.classList.add('has-file')}}
+ input.addEventListener('change',()=>showFile(input.files[0]));
+ ['dragenter','dragover'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.add('drag-over')}));
+ ['dragleave','drop'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.remove('drag-over')}));
+ zone.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f){const dt=new DataTransfer();dt.items.add(f);input.files=dt.files;showFile(f)}});
+});
+</script>
+{% endblock %}

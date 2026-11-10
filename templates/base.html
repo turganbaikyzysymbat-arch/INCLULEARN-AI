@@ -1,0 +1,21 @@
+<!doctype html><html lang="kk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#fffaf5"><meta name="description" content="IncluLearn AI — инклюзивті білім беруге арналған ақылды оқу кеңістігі."><title>{{ title or "IncluLearn AI" }}</title><link rel="stylesheet" href="{{url_for('static',filename='style.css')}}"></head><body>
+{% if session.uid %}
+<aside class="sidebar"><a class="brand" href="/dashboard"><span class="brand-mark">✿</span><span>inclulearn<small>AI LEARNING SPACE</small></span></a><div class="side-label">ЖҰМЫС КЕҢІСТІГІ</div><nav class="side-nav">
+<a href="/dashboard" class="{{'active' if request.endpoint=='dashboard' else ''}}"><i>⌂</i> Басты бет</a>
+{% if session.role in ['teacher','admin'] %}<a href="/adapt" class="{{'active' if request.endpoint=='adapt' else ''}}"><i>✳</i> AI бейімдеу студиясы</a>{% endif %}
+<a href="/dashboard"><i>▧</i> Материалдар</a>
+
+<a href="/assistant"><i>✧</i> AI көмекші</a>
+<a href="/dashboard"><i>◷</i> Тапсырмалар</a>
+{% if session.role=='admin' %}<a href="/admin"><i>⚙</i> Әкімші панелі</a>{% endif %}
+</nav><div class="side-bottom"><a class="side-user" href="/logout"><span class="avatar">{{session.name[:1]|upper}}</span><span><b>{{session.name}}</b><small>{{'Мұғалім' if session.role=='teacher' else 'Оқушы' if session.role=='student' else 'Әкімші'}}</small></span><span class="logout">↗</span></a></div></aside>
+{% endif %}
+
+<div class="{{'app-shell' if session.uid else 'public-shell'}}">
+{% if session.uid %}<header class="topbar"><div class="crumb">IncluLearn <span>/</span> {{'Мұғалім кеңістігі' if session.role=='teacher' else 'Оқушы кеңістігі' if session.role=='student' else 'Әкімші'}}</div><div class="top-actions"><label class="searchbox"><span>⌕</span><input placeholder="Материал, тақырып іздеу..."></label><button class="icon-btn" aria-label="Хабарландырулар">♧<em></em></button><button class="access-trigger" onclick="toggleAccess()">◐ <span>Қолжетімділік</span></button></div></header>{% else %}<header class="public-nav"><a class="brand" href="/"><span class="brand-mark">✿</span><span>inclulearn<small>AI LEARNING SPACE</small></span></a><nav><a href="#features">Мүмкіндіктер</a><a href="#about">Платформа туралы</a><a href="#access">Қолжетімділік</a></nav><div><a class="login-link" href="/login">Кіру</a><a class="primary-btn small" href="/register">Тіркелу <span>↗</span></a></div></header>{% endif %}
+{% with messages=get_flashed_messages(with_categories=true) %}{% for cat,msg in messages %}<div class="flash {{cat}}">{{msg}}</div>{% endfor %}{% endwith %}
+<main>{% block content %}{% endblock %}</main>
+{% if not session.uid %}<footer class="public-footer"><a class="brand" href="/"><span class="brand-mark">✿</span><span>inclulearn<small>AI LEARNING SPACE</small></span></a><span>Әр оқушыға қолжетімді білім.</span><small>© 2026 IncluLearn AI</small></footer>{% endif %}
+</div>
+<div class="access-panel" id="accessPanel"><div class="access-head"><b>Қолжетімділік орталығы</b><button onclick="toggleAccess()">×</button></div><p>Оқу ортасын өзіңізге ыңғайлаңыз.</p><div class="access-row"><span>Мәтін өлшемі</span><div><button onclick="fontStep(-1)">A−</button><button onclick="fontStep(1)">A+</button></div></div><button class="access-option" onclick="document.body.classList.toggle('contrast')">◐ Жоғары контраст</button><button class="access-option" onclick="document.body.classList.toggle('dyslexia')">Aa Оқуға жеңіл қаріп</button><button class="access-option" onclick="document.body.classList.toggle('focus-mode')">◎ Назар режимі</button><button class="access-option" onclick="readPage()">▶ Дауыстап оқу</button><button class="access-option" onclick="stopRead()">■ Оқуды тоқтату</button><small>Дауыстап оқу браузер мен құрылғының тілдік қолдауына тәуелді.</small></div>
+<script src="{{url_for('static',filename='app.js')}}"></script></body></html>
