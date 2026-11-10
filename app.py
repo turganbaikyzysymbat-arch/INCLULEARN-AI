@@ -1,6 +1,9 @@
-import os, sqlite3, secrets, re
+import os, sqlite3, secrets, re, shutil, subprocess, tempfile
+import markdown
+import bleach
+from markupsafe import Markup
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -14,6 +17,29 @@ DB = os.path.join(ROOT, "inclulearn.db")
 UPLOAD = os.path.join(ROOT, "uploads")
 os.makedirs(UPLOAD, exist_ok=True)
 app = Flask(__name__)
+
+def render_markdown(value):
+    html = markdown.markdown(
+        value or "",
+        extensions=["extra", "sane_lists"]
+    )
+    allowed_tags = {
+        "p", "h1", "h2", "h3", "h4",
+        "strong", "em", "ul", "ol", "li",
+        "blockquote", "code", "pre",
+        "table", "thead", "tbody", "tr", "th", "td",
+        "hr", "br"
+    }
+    clean_html = bleach.clean(
+        html,
+        tags=allowed_tags,
+        attributes={},
+        strip=True
+    )
+    return Markup(clean_html)
+
+app.jinja_env.filters["render_markdown"] = render_markdown
+
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-before-deploy")
 app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024
 ALLOWED = {"txt", "pdf", "docx"}
@@ -147,7 +173,7 @@ def ai_generate(system_prompt, user_prompt, max_chars=24000):
     client=Anthropic(api_key=key)
     response=client.messages.create(
         model=model,
-        max_tokens=5000,
+        max_tokens=3000,
         system=system_prompt,
         messages=[{"role":"user", "content":user_prompt[:max_chars]}]
     )
@@ -156,14 +182,68 @@ def ai_generate(system_prompt, user_prompt, max_chars=24000):
         raise RuntimeError("Claude жауабы тым қысқа немесе бос")
     return result
 
-def adapt_text(text,support,grade,subject="",topic=""):
-    if not text or len(text.strip())<30: raise ValueError("Материал тым қысқа. Кемінде 30 таңба енгізіңіз")
-    instructions=f"""Сен Қазақстан мектебіне арналған тәжірибелі пән мұғалімі, әдіскер және инклюзивті педагогсің. {grade}-сынып, пән: {subject}, тақырып: {topic or 'мәтіннен анықта'}. Оқушыға қажет қолдау: {support or 'түсінікті құрылымды тіл'}.
-МІНДЕТ: берілген бастапқы материал негізінде сабақта бірден қолдануға болатын сапалы, толық және нақты бейімделген оқу материалын жаса. Тек бастапқы мәтіндегі дәлелденген ақпаратты пайдалан; деректерді, анықтамаларды, пәндік терминдерді, формулаларды, даталарды және себеп-салдар байланыстарын бұрмалама. Жоқ ақпаратты ойдан қоспа. Күрделі сөйлемдерді қысқарт, бір сөйлемде бір негізгі ой бер, жаңа терминді қарапайым тілмен түсіндір. Бейімдеу оқушының жасына және сынып деңгейіне сай болсын, бірақ оқу мақсаты мен пәндік мазмұн жеңілдету кезінде жоғалмасын.
-МІНДЕТТІ ҚҰРЫЛЫМ: 1) Тақырып; 2) нақты оқу мақсаты; 3) негізгі ұғымдар мен қысқа сөздік; 4) кезең-кезеңімен түсіндіру; 5) мазмұнға дәл сәйкес мысал; 6) үш деңгейдегі тапсырмалар (жеңіл, орта, күрделі), жауаптары емес, орындау нұсқаулығымен; 7) өзін-өзі тексеруге арналған 3-5 сұрақ; 8) мұғалімге ескерту және қажет болса тексерілуі тиіс тұстар.
-Қолдау түріне сай форматта: {support or 'қысқа абзацтар, нақты қадамдар және түсінікті тіл'}. Тапсырмалар оқу мақсатына тікелей сәйкес болсын. Бастапқы мәтінді тұтас көшірме. Нәтижені сауатты қазақ тілінде, тақырыпшалармен және оқуға ыңғайлы ретпен жаз."""
-    result=ai_generate(instructions,"ОҚУ МАТЕРИАЛЫ:\n"+text)
-    if result.strip()==text.strip(): raise RuntimeError("AI бастапқы мәтінді өзгертпеді")
+def adapt_text(text, support, grade, subject="", topic=""):
+    if not text or len(text.strip()) < 30:
+        raise ValueError("Материал тым қысқа. Кемінде 30 таңба енгізіңіз")
+
+    selected = [x.strip() for x in support.split(",") if x.strip()]
+
+    support_instructions = {
+        "Оқуды түсіну және мәтінді жеңілдету": "Мәтінді қарапайым қазақ тілімен, қысқа сөйлемдермен қайта түсіндір.",
+        "Қысқа қадамдарға бөлу": "Тақырыпты ретімен, нөмірленген нақты қадамдармен түсіндір.",
+        "Қосымша мысалдар": "Тақырыпқа сәйкес кемінде екі дұрыс, түсінікті мысал келтір.",
+        "Визуалды тірек": "Ұғымдардың байланысын мәтіндік схема немесе қарапайым сызба түрінде көрсет.",
+        "Аудио нұсқа": "Оқуға ыңғайлы, табиғи айтылатын қысқа сөйлемдермен жеке мәтін дайында.",
+        "Көру қолдауы": "Мәтінді анық тақырыпшалармен, қысқа абзацтармен және оқуға ыңғайлы форматта бер.",
+        "Қысқаша резюме": "Тақырыптың ең маңызды ойларын қысқа қорытындыла.",
+        "Қосымша күрделі тапсырмалар": "Оқушы деңгейіне сай үш бейімделген тапсырма құрастыр: жеңіл, орташа және күрделі. Әрқайсысының шарты мен орындау нұсқаулығын бер."
+    }
+
+    requested = "\\n".join(
+        f"- {name}: {support_instructions.get(name, 'Осы қолдау түрін орында.')}"
+        for name in selected
+    ) or "- Қысқа абзацтар мен түсінікті тіл қолдан."
+
+    instructions = f"""
+Сен Қазақстан мектебіне арналған тәжірибелі инклюзивті педагогсің.
+Сынып: {grade}. Пән: {subject}. Тақырып: {topic or 'бастапқы мәтіннен анықта'}.
+
+МІНДЕТ:
+Бастапқы материалды оқушының жасына сай бейімде.
+Пәндік ақпаратты, терминдерді, формулаларды және кодты бұрмалама.
+Тек бастапқы мәтіндегі ақпаратты пайдалан. Жоқ деректі ойдан қоспа.
+Қазақ тілінде сауатты әрі ықшам жаз.
+
+МІНДЕТТІ ЖАЛПЫ БӨЛІМДЕР:
+## Тақырып
+## Оқу мақсаты
+## Негізгі ұғымдар
+## Түсіндіру
+
+ТАҢДАЛҒАН ҚОЛДАУ ТҮРЛЕРІ:
+{requested}
+
+ӨТЕ МАҢЫЗДЫ:
+Жоғарыда таңдалған ӘРБІР қолдау түрін жеке тақырыпша ретінде орында.
+Бірде-бір таңдалған қолдауды өткізіп алма.
+Таңдалмаған қолдау түрлерін қоспа.
+"Қосымша күрделі тапсырмалар" таңдалса ғана тапсырмалар жаса.
+Егер ол таңдалмаса, тапсырмалар мен тесттер қоспа.
+Критериалды бағалау бөлімін қоспа.
+Кесте, сәндік символдар және көлденең сызықтар қолданба.
+Markdown тақырыпшалары мен қалың қаріпті қолдануға болады.
+Бір ойды қайталама. Қысқа абзацтар жаз.
+"""
+
+    result = ai_generate(
+        instructions,
+        "БАСТАПҚЫ ОҚУ МАТЕРИАЛЫ:\\n" + text,
+        18000
+    )
+
+    if len(result) < 120 or result.strip() == text.strip():
+        raise RuntimeError("AI жауабы тым қысқа немесе бастапқы мәтін өзгертілмеген")
+
     return result
 
 @app.route("/material/<int:mid>")
@@ -269,6 +349,209 @@ def analytics():
 def admin():
     c=db(); users=c.execute("SELECT id,name,email,role FROM users ORDER BY id DESC").fetchall(); feedbacks=c.execute("SELECT * FROM feedback ORDER BY id DESC").fetchall(); c.close()
     return render_template("admin.html",users=users,feedbacks=feedbacks)
+
+
+@app.route("/ai-tools")
+@login_required
+@role_required("teacher", "admin")
+def ai_tools():
+    return render_template("ai_tools.html")
+
+
+def generate_tool_result(tool, title, grade, subject, topic, details):
+    prompts = {
+        "worksheet": (
+            "Сен тәжірибелі мұғалімсің. Қазақ тілінде оқу мақсатына сай жұмыс парағын жаса. "
+            "Тапсырмалар түсінікті, әртүрлі және оқушы жасына сәйкес болсын. "
+            "Соңында жауап кілтін және бағалау критерийлерін бер."
+        ),
+        "visual": (
+            "Сен визуалды оқыту маманысың. Тақырыпты қазақ тілінде қарапайым қадамдармен түсіндір. "
+            "Негізгі ұғымдарды, олардың байланысын, мәтіндік сызбаны, мысалдарды және қысқаша қорытындыны бер. "
+            "Сызбаны Markdown code block ішінде көрсет."
+        ),
+        "levels": (
+            "Сен инклюзивті білім беру маманысың. Бір оқу мақсатын сақтап, бір сабақты үш деңгейге бейімде. "
+            "1-деңгей: жеңіл мәтін, қысқа сөйлемдер, нақты қадамдар және визуалды тірек. "
+            "2-деңгей: стандартты түсіндіру, мысалдар және жаттығулар. "
+            "3-деңгей: күрделі тапсырмалар, логикалық сұрақтар және зерттеу жұмысы. "
+            "Әр деңгейде бірдей оқу мақсаты сақталсын."
+        )
+    }
+    user_prompt = (
+        f"Құрал: {tool}\nТақырып: {title}\nСынып: {grade}\n"
+        f"Пән: {subject}\nОқу тақырыбы: {topic}\nҚосымша талаптар: {details}"
+    )
+    return ai_generate(prompts[tool], user_prompt)
+
+
+@app.route("/ai-tools/worksheet", methods=["GET", "POST"])
+@login_required
+@role_required("teacher", "admin")
+def worksheet():
+    result = None
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        grade = request.form.get("grade", "7")
+        subject = request.form.get("subject", "Информатика")
+        topic = request.form.get("topic", "").strip()
+        details = (
+            f"Тапсырма саны: {request.form.get('count', '5')}. "
+            f"Қиындық деңгейі: {request.form.get('difficulty', 'Орташа')}. "
+            f"Жауап кілті: {request.form.get('answers', 'yes')}."
+        )
+        if not title or not topic:
+            flash("Тақырып пен оқу мақсатын немесе тақырып сипаттамасын енгізіңіз.", "error")
+        else:
+            try:
+                result = generate_tool_result("worksheet", title, grade, subject, topic, details)
+            except Exception as e:
+                app.logger.exception("Worksheet generation failed")
+                flash("Жұмыс парағын жасау қатесі: " + str(e)[:180], "error")
+    return render_template("ai_tool_form.html", tool="worksheet", result=result, subjects=SUBJECTS)
+
+
+@app.route("/ai-tools/visual", methods=["GET", "POST"])
+@login_required
+@role_required("teacher", "admin")
+def visual_learning():
+    result = None
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        grade = request.form.get("grade", "7")
+        subject = request.form.get("subject", "Информатика")
+        topic = request.form.get("topic", "").strip()
+        if not title or not topic:
+            flash("Тақырып пен түсіндіру мақсатын енгізіңіз.", "error")
+        else:
+            try:
+                result = generate_tool_result("visual", title, grade, subject, topic, "Түсіндіруді кезеңдерге бөліп, сызба мен мысал қос.")
+            except Exception as e:
+                app.logger.exception("Visual learning generation failed")
+                flash("Түсіндіруді жасау қатесі: " + str(e)[:180], "error")
+    return render_template("ai_tool_form.html", tool="visual", result=result, subjects=SUBJECTS)
+
+
+@app.route("/ai-tools/levels", methods=["GET", "POST"])
+@login_required
+@role_required("teacher", "admin")
+def learner_levels():
+    result = None
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        grade = request.form.get("grade", "7")
+        subject = request.form.get("subject", "Информатика")
+        topic = request.form.get("topic", "").strip()
+        if not title or not topic:
+            flash("Сабақ тақырыбы мен оқу мақсатын енгізіңіз.", "error")
+        else:
+            try:
+                result = generate_tool_result("levels", title, grade, subject, topic, "Үш деңгейдің тапсырмаларын, қолдау тәсілдерін және күтілетін нәтижелерін көрсет.")
+            except Exception as e:
+                app.logger.exception("Learner levels generation failed")
+                flash("Үш деңгейлі сабақ жасау қатесі: " + str(e)[:180], "error")
+    return render_template("ai_tool_form.html", tool="levels", result=result, subjects=SUBJECTS)
+
+
+@app.route("/ai-tools/worksheet/pdf", methods=["POST"])
+@login_required
+@role_required("teacher", "admin")
+def worksheet_pdf():
+    content = request.form.get("content", "").strip()
+    title = request.form.get("title", "Жұмыс парағы").strip()[:120]
+    if not content:
+        flash("PDF жасау үшін жұмыс парағының мәтіні жоқ.", "error")
+        return redirect(url_for("worksheet"))
+    try:
+        import io
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Preformatted
+        from xml.sax.saxutils import escape
+
+        font_path = os.path.join(ROOT, "static", "fonts", "Verdana.ttf")
+        if not os.path.exists(font_path):
+            raise FileNotFoundError("Қазақша қаріп табылмады.")
+        if "IncluVerdana" not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont("IncluVerdana", font_path))
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=18*mm, bottomMargin=18*mm)
+        styles = getSampleStyleSheet()
+        heading = ParagraphStyle("IncluHeading", parent=styles["Heading1"], fontName="IncluVerdana", fontSize=16, leading=21, spaceAfter=12)
+        body = ParagraphStyle("IncluBody", parent=styles["BodyText"], fontName="IncluVerdana", fontSize=9.5, leading=14, spaceAfter=7)
+        story = [Paragraph(escape(title), heading)]
+        for line in content.splitlines():
+            line = line.strip()
+            if not line:
+                story.append(Spacer(1, 4))
+            elif line.startswith("#"):
+                story.append(Paragraph(escape(line.lstrip("# ").strip()), heading))
+            else:
+                story.append(Paragraph(escape(line).replace("  ", "&nbsp;&nbsp;"), body))
+        doc.build(story)
+        buffer.seek(0)
+        return Response(buffer.getvalue(), mimetype="application/pdf", headers={"Content-Disposition": 'attachment; filename="worksheet.pdf"'})
+    except Exception as e:
+        app.logger.exception("Worksheet PDF failed")
+        flash("PDF жасау қатесі: " + str(e)[:180], "error")
+        return redirect(url_for("worksheet"))
+
+
+@app.route("/tts", methods=["POST"])
+def text_to_speech():
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()
+
+    if not text:
+        return jsonify({"error": "Мәтін бос."}), 400
+    if len(text) > 5000:
+        return jsonify({"error": "Мәтін тым ұзын."}), 400
+
+    piper = shutil.which("piper")
+    model = os.path.join(ROOT, "kk_KZ-issai-high.onnx")
+
+    if not piper or not os.path.exists(model):
+        return jsonify({"error": "Қазақша дауыс моделі табылмады."}), 500
+
+    text = re.sub(r"IncluLearn AI", "ИнклюЛёрн Эй-Ай", text, flags=re.I)
+    text = re.sub(r"IncluLearn", "ИнклюЛёрн", text, flags=re.I)
+
+    audio_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            audio_path = f.name
+
+        result = subprocess.run(
+            [piper, "-m", model, "-f", audio_path],
+            input=text,
+            text=True,
+            capture_output=True,
+            timeout=180,
+            cwd=ROOT
+        )
+
+        if result.returncode != 0:
+            return jsonify({"error": "Дыбыстау қатесі: " + result.stderr[:300]}), 500
+
+        with open(audio_path, "rb") as f:
+            audio = f.read()
+
+        return Response(audio, mimetype="audio/wav")
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Дыбыстауға берілген уақыт аяқталды."}), 504
+    except Exception as e:
+        return jsonify({"error": str(e)[:300]}), 500
+    finally:
+        if audio_path and os.path.exists(audio_path):
+            os.remove(audio_path)
+
+
 init_db()
 
 if __name__=="__main__":

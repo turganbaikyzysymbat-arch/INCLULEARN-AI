@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+{% set is_worksheet = tool == "worksheet" %}
+{% set is_visual = tool == "visual" %}
+<section class="page-wrap ai-tool-form-page">
+    <a href="{{ url_for('ai_tools') }}" class="back-link">← AI Tools бөліміне оралу</a>
+
+    <div class="page-heading">
+        <span class="eyebrow">INCLUSIVE EDUCATION · AI WORKSPACE</span>
+        {% if is_worksheet %}
+            <h1>Worksheet Generator</h1>
+            <p>Оқушыларға арналған жұмыс парағын автоматты түрде жасаңыз.</p>
+        {% elif is_visual %}
+            <h1>Visual Learning AI</h1>
+            <p>Күрделі тақырыптарды визуалды сызбалар және қадамдар арқылы түсіндіріңіз.</p>
+        {% else %}
+            <h1>One Lesson — Different Learners</h1>
+            <p>Бір оқу мақсатына арналған үш деңгейлі сабақ жасаңыз.</p>
+        {% endif %}
+    </div>
+
+    <div class="ai-tool-form-card">
+        <form method="POST">
+            <div class="form-grid">
+                <label>
+                    Сабақ тақырыбы
+                    <input type="text" name="title" required placeholder="Мысалы: Алгоритмдер">
+                </label>
+                <label>
+                    Сынып
+                    <select name="grade">
+                        {% for g in range(1,12) %}
+                        <option value="{{ g }}" {% if g == 7 %}selected{% endif %}>{{ g }}-сынып</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Пән
+                    <select name="subject">
+                        {% for s in subjects %}
+                        <option value="{{ s }}" {% if s == 'Информатика' %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="full-width">
+                    Оқу мақсаты және тақырып туралы мәлімет
+                    <textarea name="topic" rows="4" required placeholder="Оқу мақсатын және оқушы нені меңгеруі керектігін жазыңыз..."></textarea>
+                </label>
+
+                {% if is_worksheet %}
+                <label>
+                    Тапсырма саны
+                    <select name="count">
+                        <option value="5">5 тапсырма</option>
+                        <option value="10">10 тапсырма</option>
+                        <option value="15">15 тапсырма</option>
+                    </select>
+                </label>
+                <label>
+                    Қиындық деңгейі
+                    <select name="difficulty">
+                        <option>Жеңіл</option>
+                        <option selected>Орташа</option>
+                        <option>Күрделі</option>
+                    </select>
+                </label>
+                <label>
+                    Жауап кілті
+                    <select name="answers">
+                        <option value="yes">Қосу</option>
+                        <option value="no">Қоспау</option>
+                    </select>
+                </label>
+                {% endif %}
+            </div>
+            <button type="submit" class="primary-btn ai-generate-btn">✧ AI арқылы жасау</button>
+        </form>
+    </div>
+
+    {% if result %}
+    <section class="ai-result-card">
+        <div class="ai-result-header">
+            <div>
+                <span class="eyebrow">AI GENERATED CONTENT</span>
+                <h2>Дайын нәтиже</h2>
+            </div>
+            {% if is_worksheet %}
+            <form method="POST" action="{{ url_for('worksheet_pdf') }}" target="_blank">
+                <input type="hidden" name="title" value="Жұмыс парағы">
+                <textarea name="content" hidden>{{ result }}</textarea>
+                <button type="submit" class="secondary-btn">PDF жүктеу ↓</button>
+            </form>
+            {% endif %}
+        </div>
+        <div class="ai-result-content">{{ result | render_markdown }}</div>
+    </section>
+    {% endif %}
+</section>
+{% endblock %}

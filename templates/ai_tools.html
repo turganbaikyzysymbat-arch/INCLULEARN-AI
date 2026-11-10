@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-wrap ai-tools-page">
+    <div class="page-heading">
+        <span class="eyebrow">INCLUSIVE EDUCATION · AI WORKSPACE</span>
+        <h1>AI Tools</h1>
+        <p>Мұғалімдерге арналған интеллектуалды оқу құралдары.</p>
+    </div>
+
+    <div class="ai-tools-grid">
+        <a class="ai-tool-card" href="{{ url_for('worksheet') }}">
+            <span class="ai-tool-icon">▤</span>
+            <span class="ai-tool-tag">01 · CREATE</span>
+            <h2>Worksheet Generator</h2>
+            <p>Оқу тақырыбы бойынша тапсырмалар, жаттығулар және жауап кілтін автоматты түрде жасаңыз.</p>
+            <span class="ai-tool-link">Құралды ашу →</span>
+        </a>
+
+        <a class="ai-tool-card" href="{{ url_for('visual_learning') }}">
+            <span class="ai-tool-icon">◇</span>
+            <span class="ai-tool-tag">02 · VISUALIZE</span>
+            <h2>Visual Learning AI</h2>
+            <p>Күрделі тақырыптарды сызбалар, құрылымдар және қадамдық түсіндіру арқылы меңгертіңіз.</p>
+            <span class="ai-tool-link">Құралды ашу →</span>
+        </a>
+
+        <a class="ai-tool-card" href="{{ url_for('learner_levels') }}">
+            <span class="ai-tool-icon">◎</span>
+            <span class="ai-tool-tag">03 · DIFFERENTIATE</span>
+            <h2>One Lesson — Different Learners</h2>
+            <p>Бір оқу мақсатын сақтай отырып, сабақты үш түрлі оқу деңгейіне бейімдеңіз.</p>
+            <span class="ai-tool-link">Құралды ашу →</span>
+        </a>
+    </div>
+</section>
+{% endblock %}

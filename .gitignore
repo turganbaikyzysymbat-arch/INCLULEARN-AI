@@ -5,3 +5,7 @@ __pycache__/
 *.db
 .DS_Store
 uploads/
+
+# Local Kazakh Piper voice model
+kk_KZ-issai-high.onnx
+kk_KZ-issai-high.onnx.json

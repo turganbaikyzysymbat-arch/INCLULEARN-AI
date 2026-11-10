@@ -1,1 +1,113 @@
-{% extends "base.html" %}{% block content %}<div class="page-title"><div><div class="eyebrow">ADAPTED LEARNING MATERIAL</div><h1>{{m.title}}</h1><p>{{m.grade}}-сынып · {{m.subject}} · {{m.topic}}</p></div><span class="ready-chip">✓ Бейімделген материал</span></div><div class="reader-tools"><button onclick="readElement('adaptedText')">▶ Дауыстап оқу</button><button onclick="stopRead()">■ Тоқтату</button><button onclick="fontStep(1)">A+</button><button onclick="fontStep(-1)">A−</button><button onclick="document.body.classList.toggle('contrast')">◐ Контраст</button><button onclick="document.body.classList.toggle('focus-mode')">◎ Назар режимі</button></div><article class="reader-card"><div class="reader-meta"><span class="ready-chip">{% if m.adapted.startswith("ДЕМО-НӘТИЖЕ") %}ДЕМО НӘТИЖЕ · AI API-сіз{% else %}AI БЕЙІМДЕГЕН{% endif %}</span><span>{{m.grade}}-сынып · {{m.subject}}</span></div><div id="adaptedText" class="adapted-content">{% if m.adapted.startswith("ДЕМО-НӘТИЖЕ") %}{{m.adapted.split("\n", 1)[1]}}{% else %}{{m.adapted}}{% endif %}</div></article><form class="surface-card assign-card" method="post" action="/assign/{{m.id}}"><div class="card-heading"><span class="step-number">↗</span><div><h2>Оқушыға жариялау</h2><p>Материалды тапсырма ретінде жіберіңіз.</p></div></div><div class="field-grid"><label>Сынып/топ<input name="class_name" placeholder="7А"></label><label>Бағалау критерийлері<input name="criteria" placeholder="Критерийлерді енгізіңіз"></label></div><button class="primary-btn">Тапсырма ретінде жариялау →</button></form>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-title">
+    <div>
+        <div class="eyebrow">ADAPTED LEARNING MATERIAL</div>
+        <h1>{{m.title}}</h1>
+        <p>{{m.grade}}-сынып · {{m.subject}} · {{m.topic}}</p>
+    </div>
+    <span class="ready-chip">✓ Бейімделген материал</span>
+</div>
+
+<div class="reader-tools">
+    <button onclick="readElement('adaptedText')">▶ Дауыстап оқу</button>
+    <button onclick="stopRead()">■ Тоқтату</button>
+    <button onclick="fontStep(1)">A+</button>
+    <button onclick="fontStep(-1)">A−</button>
+    <button onclick="document.body.classList.toggle('contrast')">◐ Контраст</button>
+    <button onclick="document.body.classList.toggle('focus-mode')">◎ Назар режимі</button>
+</div>
+
+<article class="reader-card">
+    <div class="reader-meta">
+        <span class="ready-chip">
+            {% if m.adapted.startswith("ДЕМО-НӘТИЖЕ") %}
+            ДЕМО НӘТИЖЕ
+            {% else %}
+            AI БЕЙІМДЕГЕН
+            {% endif %}
+        </span>
+        <span>{{m.grade}}-сынып · {{m.subject}}</span>
+    </div>
+
+    <div id="adaptedText" class="adapted-content">
+        {% if m.adapted.startswith("ДЕМО-НӘТИЖЕ") %}
+            {{m.adapted.split("\n", 1)[1] | render_markdown}}
+        {% else %}
+            {{m.adapted | render_markdown}}
+        {% endif %}
+    </div>
+
+    <div id="materialTabs" class="material-tabs" hidden></div>
+    <div id="materialPanels" class="material-panels"></div>
+</article>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const content = document.getElementById('adaptedText');
+    const tabs = document.getElementById('materialTabs');
+    const panels = document.getElementById('materialPanels');
+
+    if (!content || !tabs || !panels) return;
+
+    const headings = [...content.querySelectorAll('h2')];
+    const excluded = /тапсырма|критериалды бағалау|өзін-өзі тексеру|мұғалімге ескерту/i;
+
+    if (!headings.length) return;
+
+    const sections = [];
+    let current = null;
+
+    [...content.children].forEach(node => {
+        if (node.tagName === 'H2') {
+            current = {
+                title: node.textContent.replace(/^\d+[\s.)-]*/, '').trim(),
+                nodes: []
+            };
+
+            if (!excluded.test(current.title)) sections.push(current);
+            else current = null;
+        } else if (current) {
+            current.nodes.push(node.cloneNode(true));
+        }
+    });
+
+    if (!sections.length) return;
+
+    content.hidden = true;
+    tabs.hidden = false;
+
+    sections.forEach((section, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'material-tab';
+        button.textContent = section.title;
+        button.setAttribute('aria-selected', index === 0 ? 'true' : 'false');
+
+        const panel = document.createElement('section');
+        panel.className = 'material-tab-panel';
+        panel.hidden = index !== 0;
+
+        section.nodes.forEach(node => panel.appendChild(node));
+
+        button.addEventListener('click', () => {
+            tabs.querySelectorAll('.material-tab').forEach(b => {
+                b.setAttribute('aria-selected', 'false');
+            });
+
+            panels.querySelectorAll('.material-tab-panel').forEach(p => {
+                p.hidden = true;
+            });
+
+            button.setAttribute('aria-selected', 'true');
+            panel.hidden = false;
+        });
+
+        tabs.appendChild(button);
+        panels.appendChild(panel);
+    });
+});
+</script>
+
+{% endblock %}

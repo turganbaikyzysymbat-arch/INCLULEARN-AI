@@ -3,6 +3,7 @@
 <aside class="sidebar"><a class="brand" href="/dashboard"><span class="brand-mark">✿</span><span>inclulearn<small>AI LEARNING SPACE</small></span></a><div class="side-label">ЖҰМЫС КЕҢІСТІГІ</div><nav class="side-nav">
 <a href="/dashboard" class="{{'active' if request.endpoint=='dashboard' else ''}}"><i>⌂</i> Басты бет</a>
 {% if session.role in ['teacher','admin'] %}<a href="/adapt" class="{{'active' if request.endpoint=='adapt' else ''}}"><i>✳</i> AI бейімдеу студиясы</a>{% endif %}
+{% if session.role in ['teacher','admin'] %}<a href="/ai-tools" class="{{'active' if request.endpoint in ['ai_tools','worksheet','visual_learning','learner_levels'] else ''}}"><i>✧</i> AI Tools</a>{% endif %}
 <a href="/dashboard"><i>▧</i> Материалдар</a>
 
 <a href="/assistant"><i>✧</i> AI көмекші</a>
