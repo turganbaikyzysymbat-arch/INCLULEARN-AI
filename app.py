@@ -122,7 +122,7 @@ def dashboard():
         rows=c.execute("""SELECT a.*,m.title,m.grade,m.subject,m.topic,u.name teacher FROM assignments a JOIN materials m ON m.id=a.material_id JOIN users u ON u.id=a.teacher_id LEFT JOIN submissions s ON s.assignment_id=a.id AND s.student_id=? WHERE s.id IS NULL OR s.student_id=? ORDER BY a.id DESC""",(session["uid"],session["uid"])).fetchall()
     else:
         rows=c.execute("""SELECT a.*,m.title,m.grade,m.subject,m.topic FROM assignments a JOIN materials m ON m.id=a.material_id WHERE a.teacher_id=? ORDER BY a.id DESC""",(session["uid"],)).fetchall()
-        materials=c.execute("SELECT * FROM materials WHERE teacher_id=? ORDER BY id DESC LIMIT 12",(session["uid"],)).fetchall()
+        materials=c.execute("SELECT * FROM materials WHERE teacher_id=? ORDER BY id DESC",(session["uid"],)).fetchall()
     if session["role"]=="student": materials=[]
     c.close()
     return render_template("dashboard.html",rows=rows,materials=materials)
@@ -253,12 +253,121 @@ def material(mid):
     if not m: return "Материал табылмады",404
     if session.get("role") not in ("admin",) and session.get("role")!="student" and m["teacher_id"]!=session.get("uid"): return "Қолжетімділік жоқ",403
     return render_template("material.html",m=m)
+@app.route("/material/<int:mid>/download/pdf")
+@login_required
+def download_material_pdf(mid):
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from xml.sax.saxutils import escape
+
+    c = db()
+    m = c.execute("SELECT * FROM materials WHERE id=?", (mid,)).fetchone()
+    c.close()
+    if not m:
+        return "Материал табылмады", 404
+    if session.get("role") != "admin" and session.get("role") != "student" and m["teacher_id"] != session.get("uid"):
+        return "Қолжетімділік жоқ", 403
+
+    font_path = os.path.join(ROOT, "static", "fonts", "Verdana.ttf")
+    if "IncluVerdana" not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont("IncluVerdana", font_path))
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=18*mm, bottomMargin=18*mm)
+    styles = getSampleStyleSheet()
+    heading = ParagraphStyle("MaterialTitle", parent=styles["Heading1"], fontName="IncluVerdana", fontSize=16, leading=21, spaceAfter=12)
+    body = ParagraphStyle("MaterialBody", parent=styles["BodyText"], fontName="IncluVerdana", fontSize=9.5, leading=14, spaceAfter=7)
+    story = [Paragraph(escape(m["title"]), heading),
+             Paragraph(escape(f'{m["grade"]}-сынып · {m["subject"]} · {m["topic"]}'), body),
+             Spacer(1, 10)]
+    for line in (m["adapted"] or "").splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            story.append(Paragraph(escape(line.lstrip("# ").strip()), heading))
+        elif line:
+            story.append(Paragraph(escape(line), body))
+        else:
+            story.append(Spacer(1, 4))
+    doc.build(story)
+    buffer.seek(0)
+    return Response(buffer.getvalue(), mimetype="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="material.pdf"'})
+
+
+@app.route("/material/<int:mid>/download/docx")
+@login_required
+def download_material_docx(mid):
+    import io
+    from docx import Document
+    from docx.shared import Pt
+
+    c = db()
+    m = c.execute("SELECT * FROM materials WHERE id=?", (mid,)).fetchone()
+    c.close()
+    if not m:
+        return "Материал табылмады", 404
+    if session.get("role") != "admin" and session.get("role") != "student" and m["teacher_id"] != session.get("uid"):
+        return "Қолжетімділік жоқ", 403
+
+    document = Document()
+    document.add_heading(m["title"], 0)
+    info = document.add_paragraph()
+    info.add_run(f'{m["grade"]}-сынып · {m["subject"]} · {m["topic"]}')
+    document.add_paragraph("")
+    for line in (m["adapted"] or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("### "):
+            document.add_heading(line[4:], level=3)
+        elif line.startswith("## "):
+            document.add_heading(line[3:], level=2)
+        elif line.startswith("# "):
+            document.add_heading(line[2:], level=1)
+        else:
+            document.add_paragraph(line)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    buffer.seek(0)
+    return Response(buffer.getvalue(),
+                    mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": 'attachment; filename="material.docx"'})
+
+
 @app.route("/assign/<int:mid>",methods=["POST"])
 @login_required
 @role_required("teacher","admin")
 def assign(mid):
-    c=db(); c.execute("INSERT INTO assignments(material_id,teacher_id,class_name,criteria) VALUES(?,?,?,?)",(mid,session["uid"],request.form.get("class_name",""),request.form.get("criteria",""))); c.commit(); c.close()
-    flash("Материал тапсырма ретінде жарияланды.","success"); return redirect(url_for("dashboard"))
+    c = db()
+    material = c.execute(
+        "SELECT * FROM materials WHERE id=?", (mid,)
+    ).fetchone()
+
+    if not material:
+        c.close()
+        return "Материал табылмады", 404
+
+    if session["role"] != "admin" and material["teacher_id"] != session["uid"]:
+        c.close()
+        return "Бұл материалды жариялауға рұқсатыңыз жоқ", 403
+
+    c.execute(
+        "INSERT INTO assignments(material_id,teacher_id,class_name,criteria) VALUES(?,?,?,?)",
+        (mid, session["uid"], request.form.get("class_name", "").strip(),
+         request.form.get("criteria", "").strip())
+    )
+    c.commit()
+    c.close()
+
+    flash("Материал тапсырма ретінде жарияланды.", "success")
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/assignment/<int:aid>",methods=["GET","POST"])
 @login_required
 def assignment(aid):
@@ -385,6 +494,20 @@ def generate_tool_result(tool, title, grade, subject, topic, details):
     return ai_generate(prompts[tool], user_prompt)
 
 
+def save_ai_material(title, grade, subject, topic, content, tool_name):
+    c = db()
+    cur = c.execute(
+        """INSERT INTO materials
+        (teacher_id, title, grade, subject, topic, original, adapted, support)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (session["uid"], title, grade, subject, topic, topic, content, tool_name)
+    )
+    mid = cur.lastrowid
+    c.commit()
+    c.close()
+    return mid
+
+
 @app.route("/ai-tools/worksheet", methods=["GET", "POST"])
 @login_required
 @role_required("teacher", "admin")
@@ -405,6 +528,8 @@ def worksheet():
         else:
             try:
                 result = generate_tool_result("worksheet", title, grade, subject, topic, details)
+                mid = save_ai_material(title, grade, subject, topic, result, "AI жұмыс парағы")
+                return redirect(url_for("material", mid=mid))
             except Exception as e:
                 app.logger.exception("Worksheet generation failed")
                 flash("Жұмыс парағын жасау қатесі: " + str(e)[:180], "error")
@@ -426,6 +551,8 @@ def visual_learning():
         else:
             try:
                 result = generate_tool_result("visual", title, grade, subject, topic, "Түсіндіруді кезеңдерге бөліп, сызба мен мысал қос.")
+                mid = save_ai_material(title, grade, subject, topic, result, "Визуалды түсіндіру")
+                return redirect(url_for("material", mid=mid))
             except Exception as e:
                 app.logger.exception("Visual learning generation failed")
                 flash("Түсіндіруді жасау қатесі: " + str(e)[:180], "error")
@@ -447,6 +574,8 @@ def learner_levels():
         else:
             try:
                 result = generate_tool_result("levels", title, grade, subject, topic, "Үш деңгейдің тапсырмаларын, қолдау тәсілдерін және күтілетін нәтижелерін көрсет.")
+                mid = save_ai_material(title, grade, subject, topic, result, "Үш деңгейлі тапсырмалар")
+                return redirect(url_for("material", mid=mid))
             except Exception as e:
                 app.logger.exception("Learner levels generation failed")
                 flash("Үш деңгейлі сабақ жасау қатесі: " + str(e)[:180], "error")
