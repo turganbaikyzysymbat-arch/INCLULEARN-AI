@@ -6,3 +6,4 @@ waitress>=3.0
 anthropic>=0.40
 gunicorn
 reportlab>=4.0
+Markdown>=3.5
