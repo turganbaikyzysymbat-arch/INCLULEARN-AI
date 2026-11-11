@@ -755,3 +755,27 @@ body{font-size:16px!important;color:#242238!important;background:#fbf9fd!importa
     font-weight: 400 !important;
     font-size: 15px !important;
 }
+
+/* Reading contrast mode */
+.adapted-content.reading-contrast {
+    background: #fffbe8 !important;
+    color: #161616 !important;
+    padding: 20px !important;
+    border-radius: 12px;
+}
+
+.adapted-content.reading-contrast * {
+    color: #161616 !important;
+}
+
+/* Contrast for visible material tabs */
+.material-tab-panel.reading-contrast {
+    background: #fffbe8 !important;
+    color: #161616 !important;
+    padding: 20px !important;
+    border-radius: 12px;
+}
+
+.material-tab-panel.reading-contrast * {
+    color: #161616 !important;
+}

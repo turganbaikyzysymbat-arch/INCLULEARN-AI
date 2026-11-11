@@ -1,6 +1,20 @@
 let currentFont=16;
 function toggleAccess(){document.getElementById('accessPanel')?.classList.toggle('open')}
-function fontStep(step){currentFont=Math.max(12,Math.min(28,currentFont+step*2));document.querySelectorAll('.adapted-content,main p,main li').forEach(el=>el.style.fontSize=currentFont+'px')}
+function fontStep(step){
+  currentFont=Math.max(12,Math.min(28,currentFont+step*2));
+  document.querySelectorAll('.adapted-content, .material-tab-panel').forEach(el=>el.style.setProperty('font-size',currentFont+'px','important'));
+}
+let currentLineHeight = 1.9;
+
+function readingSpacing(step){
+    currentLineHeight = Math.max(1.3, Math.min(2.8, currentLineHeight + step * 0.15));
+    document.querySelectorAll('.adapted-content, .material-tab-panel').forEach(el => {
+        el.style.setProperty('line-height', currentLineHeight, 'important');
+    });
+}
+function toggleReadingContrast(){
+  document.querySelectorAll('.adapted-content, .material-tab-panel').forEach(el=>el.classList.toggle('reading-contrast'));
+}
 function readElement(id){if(!('speechSynthesis'in window)){alert('Бұл браузерде дауыстап оқу қолжетімсіз.');return}speechSynthesis.cancel();const el=document.getElementById(id);if(!el)return;const u=new SpeechSynthesisUtterance(el.innerText);u.lang='kk-KZ';u.rate=.88;speechSynthesis.speak(u)}
 function readPage(){const main=document.querySelector('main');if(main)readText(main.innerText)}
 function readText(text){if(!('speechSynthesis'in window)){alert('Дауыстап оқу қолжетімсіз');return}speechSynthesis.cancel();let u=new SpeechSynthesisUtterance(text);u.lang='kk-KZ';u.rate=.9;speechSynthesis.speak(u)}

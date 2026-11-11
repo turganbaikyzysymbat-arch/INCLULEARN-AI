@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-wrap ai-tool-form-page">
+    <a href="{{ url_for('ai_tools') }}" class="back-link">← AI Tools бөліміне оралу</a>
+
+    <div class="page-heading">
+        <span class="eyebrow">INCLUSIVE EDUCATION · GAME WORKSPACE</span>
+        <h1>AI Game Creator</h1>
+        <p>Сабақ тақырыбы бойынша интерактивті білім беру ойындарын жасаңыз.</p>
+    </div>
+
+    <div class="ai-tool-form-card">
+        <form method="POST">
+            <div class="form-grid">
+                <label>Сабақ тақырыбы
+                    <input name="title" required placeholder="Мысалы: Алгоритм">
+                </label>
+                <label>Сынып
+                    <select name="grade">
+                        {% for g in range(1, 12) %}
+                        <option value="{{ g }}" {% if g == 7 %}selected{% endif %}>{{ g }}-сынып</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>Пән
+                    <select name="subject">
+                        {% for s in subjects %}
+                        <option value="{{ s }}" {% if s == 'Информатика' %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>Ойын түрі
+                    <select name="game_type">
+                        <option value="quiz">Quiz — тест</option>
+                        <option value="matching">Matching — сәйкестендіру</option>
+                        <option value="true_false">True or False — дұрыс немесе бұрыс</option>
+                    </select>
+                </label>
+                <label class="full-width">Оқу мақсаты және тақырып туралы мәлімет
+                    <textarea name="topic" rows="4" required placeholder="Оқу мақсатын және оқушы нені меңгеруі керектігін жазыңыз..."></textarea>
+                </label>
+            </div>
+            <button type="submit" class="primary-btn ai-generate-btn">✧ Ойын жасау</button>
+        </form>
+    </div>
+
+    {% if game %}
+    <section class="ai-result-card" id="game-area">
+        <div class="ai-result-header">
+            <div>
+                <span class="eyebrow">AI GENERATED GAME</span>
+                <h2>{{ game.title }}</h2>
+                <p>5 сұрақ · Әр дұрыс жауапқа 1 ұпай</p>
+            </div>
+        </div>
+
+        {% if game.share_url %}
+        <div class="game-share-box" style="margin:20px 0;padding:18px;border:1px solid #ddd;border-radius:12px;">
+            <h3>Ойынды оқушыларға жіберу</h3>
+            <p>Төмендегі сілтемені көшіріп, оқушыларға жіберіңіз.</p>
+            <input id="game-share-link" type="text" readonly value="{{ game.share_url }}" style="width:100%;padding:12px;margin-bottom:10px;">
+            <button type="button" class="primary-btn" onclick="navigator.clipboard.writeText(document.getElementById('game-share-link').value).then(()=>alert('Сілтеме көшірілді!'))">Сілтемені көшіру</button>
+            <a href="{{ game.share_url }}" target="_blank" class="secondary-btn">Ойынды ашу ↗</a>
+        </div>
+        {% endif %}
+
+        <div id="game-questions"></div>
+        <div id="game-result" hidden></div>
+    </section>
+
+    <script>
+    const gameData = {{ game | tojson }};
+    const questionsBox = document.getElementById("game-questions");
+    const resultBox = document.getElementById("game-result");
+    let current = 0;
+    let score = 0;
+    let answered = false;
+
+    function showQuestion() {
+        answered = false;
+        const q = gameData.questions[current];
+        questionsBox.innerHTML = "";
+
+        const heading = document.createElement("h3");
+        heading.textContent = `Сұрақ ${current + 1} / ${gameData.questions.length}`;
+        questionsBox.appendChild(heading);
+
+        const question = document.createElement("p");
+        question.textContent = q.question;
+        questionsBox.appendChild(question);
+
+        q.options.forEach((option, index) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "secondary-btn";
+            button.style.display = "block";
+            button.style.width = "100%";
+            button.style.margin = "10px 0";
+            button.textContent = option;
+            button.addEventListener("click", () => checkAnswer(index, button));
+            questionsBox.appendChild(button);
+        });
+
+        const feedback = document.createElement("p");
+        feedback.id = "game-feedback";
+        questionsBox.appendChild(feedback);
+
+        const next = document.createElement("button");
+        next.type = "button";
+        next.className = "primary-btn";
+        next.textContent = current === gameData.questions.length - 1 ? "Нәтижені көру" : "Келесі сұрақ →";
+        next.disabled = true;
+        next.id = "game-next";
+        next.addEventListener("click", () => {
+            current++;
+            if (current < gameData.questions.length) showQuestion();
+            else showResult();
+        });
+        questionsBox.appendChild(next);
+    }
+
+    function checkAnswer(index, selectedButton) {
+        if (answered) return;
+        answered = true;
+
+        const q = gameData.questions[current];
+        const correct = index === q.answer;
+        if (correct) score++;
+
+        document.querySelectorAll("#game-questions button.secondary-btn").forEach((button, i) => {
+            button.disabled = true;
+            if (i === q.answer) button.style.border = "2px solid #269b68";
+            else if (i === index) button.style.border = "2px solid #d65b5b";
+        });
+
+        const feedback = document.getElementById("game-feedback");
+        feedback.textContent = (correct ? "Дұрыс жауап! " : "Қате жауап. Дұрыс жауап: " + q.options[q.answer] + ". ") + (q.explanation || "");
+        document.getElementById("game-next").disabled = false;
+    }
+
+    function showResult() {
+        questionsBox.hidden = true;
+        resultBox.hidden = false;
+        resultBox.innerHTML = "";
+        const heading = document.createElement("h2");
+        heading.textContent = "Ойын аяқталды!";
+        const scoreText = document.createElement("p");
+        scoreText.textContent = `Сіздің нәтижеңіз: ${score} / ${gameData.questions.length}`;
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "primary-btn";
+        retry.textContent = "Қайта ойнау";
+        retry.addEventListener("click", () => {
+            current = 0;
+            score = 0;
+            questionsBox.hidden = false;
+            resultBox.hidden = true;
+            showQuestion();
+        });
+        resultBox.append(heading, scoreText, retry);
+    }
+
+    showQuestion();
+    </script>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-title">
+    <div>
+        <div class="eyebrow">TASK MANAGEMENT</div>
+        <h1>Тапсырмалар</h1>
+        <p>Берілген және орындалатын тапсырмалар</p>
+    </div>
+    {% if session.role in ['teacher', 'admin'] %}
+    <a class="primary-btn" href="/materials">Материалдардан тапсырма беру</a>
+    {% endif %}
+</div>
+
+{% if tasks %}
+<div class="task-list">
+{% for t in tasks %}
+    <a class="task-row" href="{{ url_for('assignment', aid=t.id) }}">
+        <span class="task-icon">✓</span>
+        <span class="task-info">
+            <b>{{ t.title }}</b>
+            <small>{{ t.grade }}-сынып · {{ t.subject }} · {{ t.class_name or 'Сынып көрсетілмеген' }}</small>
+            {% if session.role == 'student' %}
+                <small>Мұғалім: {{ t.teacher }} · {{ 'Жауап жіберілді' if t.submission_id else 'Орындалмаған' }}</small>
+            {% else %}
+                <small>Оқушы жауаптары: {{ t.submission_count }}</small>
+            {% endif %}
+            <small>Берілген күні: {{ t.created_at }}</small>
+        </span>
+        <span class="task-arrow">Ашу →</span>
+    </a>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-illustration">✓</div>
+    <h3>Әзірге тапсырма жоқ</h3>
+    <p>Жаңа тапсырмалар осы жерде көрсетіледі.</p>
+    {% if session.role in ['teacher', 'admin'] %}
+    <a class="primary-btn" href="/materials">Материалдар бөліміне өту</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

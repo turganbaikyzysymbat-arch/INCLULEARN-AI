@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-title">
+    <div>
+        <div class="eyebrow">MY LEARNING LIBRARY</div>
+        <h1>Материалдар</h1>
+        <p>Сақталған оқу материалдарыңыз</p>
+    </div>
+    <a class="primary-btn" href="/adapt">+ Жаңа материал</a>
+</div>
+{% if materials %}
+<div class="material-grid">
+{% for m in materials %}
+<a class="material-card" href="{{ url_for('material', mid=m.id) }}">
+    <div class="material-top">
+        <span class="subject-icon">▧</span>
+        <span class="status-dot">✓ Сақталған</span>
+    </div>
+    <h3>{{ m.title }}</h3>
+    <p>{{ m.grade }}-сынып · {{ m.subject }}</p>
+    <p>{{ m.topic }}</p>
+    <div class="card-bottom">
+        <span>{{ m.created_at }}</span>
+        <b>Ашу →</b>
+    </div>
+</a>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-illustration">▧</div>
+    <h3>Әзірге материал жоқ</h3>
+    <p>Алғашқы оқу материалыңызды жасап, осы жерден көре аласыз.</p>
+    <a class="primary-btn" href="/adapt">Материал жасау</a>
+</div>
+{% endif %}
+{% endblock %}

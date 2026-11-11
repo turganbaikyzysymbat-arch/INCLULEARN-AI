@@ -1,4 +1,4 @@
-import os, sqlite3, secrets, re, shutil, subprocess, tempfile
+import os, sqlite3, secrets, re, shutil, subprocess, tempfile, json
 import markdown
 import bleach
 from markupsafe import Markup
@@ -54,6 +54,17 @@ def init_db():
     c.executescript("""
     CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS materials(id INTEGER PRIMARY KEY, teacher_id INTEGER, title TEXT, grade INTEGER, subject TEXT, topic TEXT, original TEXT, adapted TEXT, support TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE IF NOT EXISTS games(
+        id INTEGER PRIMARY KEY,
+        teacher_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        grade INTEGER,
+        subject TEXT,
+        topic TEXT,
+        game_json TEXT NOT NULL,
+        share_token TEXT UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS assignments(id INTEGER PRIMARY KEY, material_id INTEGER, teacher_id INTEGER, class_name TEXT, criteria TEXT, status TEXT DEFAULT 'assigned', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assignment_id INTEGER, student_id INTEGER, answer TEXT, ai_feedback TEXT, proposed_score REAL, teacher_score REAL, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, name TEXT, email TEXT, category TEXT, message TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
@@ -126,6 +137,51 @@ def dashboard():
     if session["role"]=="student": materials=[]
     c.close()
     return render_template("dashboard.html",rows=rows,materials=materials)
+@app.route("/tasks")
+@login_required
+def tasks():
+    c = db()
+    if session["role"] == "student":
+        rows = c.execute("""
+            SELECT a.*, m.title, m.grade, m.subject, m.topic,
+                   u.name AS teacher,
+                   s.id AS submission_id, s.status AS submission_status
+            FROM assignments a
+            JOIN materials m ON m.id = a.material_id
+            JOIN users u ON u.id = a.teacher_id
+            LEFT JOIN submissions s
+              ON s.assignment_id = a.id AND s.student_id = ?
+            ORDER BY a.id DESC
+        """, (session["uid"],)).fetchall()
+    else:
+        rows = c.execute("""
+            SELECT a.*, m.title, m.grade, m.subject, m.topic,
+                   (SELECT COUNT(*) FROM submissions s
+                    WHERE s.assignment_id = a.id) AS submission_count
+            FROM assignments a
+            JOIN materials m ON m.id = a.material_id
+            WHERE a.teacher_id = ? OR ? = 'admin'
+            ORDER BY a.id DESC
+        """, (session["uid"], session["role"])).fetchall()
+    c.close()
+    return render_template("tasks.html", tasks=rows)
+
+
+@app.route("/materials")
+@login_required
+def materials():
+    c = db()
+    if session["role"] == "admin":
+        rows = c.execute("SELECT * FROM materials ORDER BY id DESC").fetchall()
+    else:
+        rows = c.execute(
+            "SELECT * FROM materials WHERE teacher_id=? ORDER BY id DESC",
+            (session["uid"],)
+        ).fetchall()
+    c.close()
+    return render_template("materials.html", materials=rows)
+
+
 @app.route("/adapt",methods=["GET","POST"])
 @login_required
 @role_required("teacher","admin")
@@ -173,7 +229,7 @@ def ai_generate(system_prompt, user_prompt, max_chars=24000):
     client=Anthropic(api_key=key)
     response=client.messages.create(
         model=model,
-        max_tokens=3000,
+        max_tokens=5000,
         system=system_prompt,
         messages=[{"role":"user", "content":user_prompt[:max_chars]}]
     )
@@ -191,14 +247,13 @@ def adapt_text(text, support, grade, subject="", topic=""):
     support_instructions = {
         "Оқуды түсіну және мәтінді жеңілдету": "Мәтінді қарапайым қазақ тілімен, қысқа сөйлемдермен қайта түсіндір.",
         "Қысқа қадамдарға бөлу": "Тақырыпты ретімен, нөмірленген нақты қадамдармен түсіндір.",
-        "Қосымша мысалдар": "Тақырыпқа сәйкес кемінде екі дұрыс, түсінікті мысал келтір.",
         "Визуалды тірек": "Ұғымдардың байланысын мәтіндік схема немесе қарапайым сызба түрінде көрсет.",
-        "Аудио нұсқа": "Оқуға ыңғайлы, табиғи айтылатын қысқа сөйлемдермен жеке мәтін дайында.",
-        "Көру қолдауы": "Мәтінді анық тақырыпшалармен, қысқа абзацтармен және оқуға ыңғайлы форматта бер.",
-        "Қысқаша резюме": "Тақырыптың ең маңызды ойларын қысқа қорытындыла.",
-        "Қосымша күрделі тапсырмалар": "Оқушы деңгейіне сай үш бейімделген тапсырма құрастыр: жеңіл, орташа және күрделі. Әрқайсысының шарты мен орындау нұсқаулығын бер."
+        "Тірек сөздер": "Тақырыптағы негізгі тірек сөздерді бөліп көрсетіп, әрқайсысына қысқа анықтама бер.",
+        "Оқуға ыңғайлы режим": "Мәтінді оқуға ыңғайлы етіп безендір: қысқа абзацтар, анық тақырыпшалар, кең жоларалық құрылым және маңызды сөздерді қалың қаріппен белгіле.",
+        "Қысқа тапсырмалар": "Тақырып бойынша бір үлкен тапсырманы бірнеше шағын, ретімен орындалатын тапсырмаға бөл.",
+        "Қосымша мысалдар": "Тақырыпқа сәйкес кемінде екі дұрыс, түсінікті мысал келтір.",
+        "Есте сақтауға көмек": "Негізгі ақпаратты есте сақтауға көмектесетін ассоциациялар, қысқа ережелер және қайталау тәсілдерін ұсын."
     }
-
     requested = "\\n".join(
         f"- {name}: {support_instructions.get(name, 'Осы қолдау түрін орында.')}"
         for name in selected
@@ -227,7 +282,7 @@ def adapt_text(text, support, grade, subject="", topic=""):
 Жоғарыда таңдалған ӘРБІР қолдау түрін жеке тақырыпша ретінде орында.
 Бірде-бір таңдалған қолдауды өткізіп алма.
 Таңдалмаған қолдау түрлерін қоспа.
-"Қосымша күрделі тапсырмалар" таңдалса ғана тапсырмалар жаса.
+"Қысқа тапсырмалар" таңдалса ғана шағын тапсырмалар жаса.
 Егер ол таңдалмаса, тапсырмалар мен тесттер қоспа.
 Критериалды бағалау бөлімін қоспа.
 Кесте, сәндік символдар және көлденең сызықтар қолданба.
@@ -497,6 +552,54 @@ def generate_tool_result(tool, title, grade, subject, topic, details):
     return ai_generate(prompts[tool], user_prompt)
 
 
+def generate_game_data(title, grade, subject, topic, game_type):
+    game_names = {
+        "quiz": "төрт нұсқалы тест",
+        "matching": "сәйкестендіру ойыны",
+        "true_false": "дұрыс немесе бұрыс ойыны"
+    }
+    if game_type not in game_names:
+        raise ValueError("Ойын түрі дұрыс таңдалмаған.")
+
+    prompt = (
+        "Сен білім беру ойындарын құрастырушы мамансың. "
+        "Қазақ тілінде оқушыға арналған ойын жаса. "
+        "Тек жарамды JSON қайтар, Markdown қолданба. "
+        "JSON құрылымы: "
+        '{"title":"Ойын атауы","questions":['
+        '{"question":"Сұрақ","options":["A","B","C","D"],'
+        '"answer":0,"explanation":"Қысқа түсіндірме"}]} '
+        "answer — дұрыс жауаптың options ішіндегі 0-ден басталатын индексі. "
+        "Дәл 5 сұрақ жаса. Әр сұрақта 4 жауап нұсқасы болсын. "
+        "Ойын түрі: " + game_names[game_type] + ". "
+        "Matching ойынында options ішіне жұптың төрт нұсқасын бер, "
+        "answer индексі дұрыс жұпты көрсетсін. "
+        "True or False ойынында options міндетті түрде "
+        '["Дұрыс", "Бұрыс"] болсын, answer 0 немесе 1 болсын. '
+        "Сұрақтар сынып деңгейіне сай және қатесіз болсын."
+    )
+    user_prompt = (
+        f"Сабақ тақырыбы: {title}\nСынып: {grade}\n"
+        f"Пән: {subject}\nОқу мақсаты: {topic}"
+    )
+    raw = ai_generate(prompt, user_prompt)
+    raw = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", raw.strip())
+    data = json.loads(raw)
+
+    if not isinstance(data.get("questions"), list) or len(data["questions"]) != 5:
+        raise ValueError("AI бес сұрақтан тұратын ойын жасамады.")
+
+    for q in data["questions"]:
+        if not isinstance(q.get("question"), str) or not isinstance(q.get("options"), list):
+            raise ValueError("Ойын сұрағының құрылымы дұрыс емес.")
+        if len(q["options"]) != (2 if game_type == "true_false" else 4):
+            raise ValueError("Жауап нұсқаларының саны дұрыс емес.")
+        if not isinstance(q.get("answer"), int) or not 0 <= q["answer"] < len(q["options"]):
+            raise ValueError("Дұрыс жауап индексі қате.")
+    data["game_type"] = game_type
+    return data
+
+
 def save_ai_material(title, grade, subject, topic, content, tool_name):
     c = db()
     cur = c.execute(
@@ -509,6 +612,58 @@ def save_ai_material(title, grade, subject, topic, content, tool_name):
     c.commit()
     c.close()
     return mid
+
+
+@app.route("/ai-tools/game", methods=["GET", "POST"])
+@login_required
+@role_required("teacher", "admin")
+def game_creator():
+    game = None
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        grade = request.form.get("grade", "7")
+        subject = request.form.get("subject", "Информатика")
+        topic = request.form.get("topic", "").strip()
+        game_type = request.form.get("game_type", "quiz")
+
+        if not title or not topic:
+            flash("Сабақ тақырыбы мен оқу мақсатын енгізіңіз.", "error")
+        else:
+            try:
+                game = generate_game_data(title, grade, subject, topic, game_type)
+                token = secrets.token_urlsafe(24)
+                c = db()
+                c.execute(
+                    """INSERT INTO games
+                    (teacher_id, title, grade, subject, topic, game_json, share_token)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (session["uid"], title, grade, subject, topic,
+                     json.dumps(game, ensure_ascii=False), token)
+                )
+                c.commit()
+                c.close()
+                game["share_url"] = url_for("play_game", token=token, _external=True)
+            except Exception as e:
+                app.logger.exception("AI game generation failed")
+                flash("Ойын жасау қатесі: " + str(e)[:180], "error")
+
+    return render_template("game_creator.html", game=game, subjects=SUBJECTS)
+
+
+@app.route("/play/<token>")
+def play_game(token):
+    c = db()
+    game = c.execute(
+        "SELECT * FROM games WHERE share_token=?",
+        (token,)
+    ).fetchone()
+    c.close()
+
+    if not game:
+        return "Ойын табылмады немесе сілтеме жарамсыз.", 404
+
+    game_data = json.loads(game["game_json"])
+    return render_template("play_game.html", game=game_data, game_info=game)
 
 
 @app.route("/ai-tools/worksheet", methods=["GET", "POST"])

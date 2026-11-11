@@ -15,7 +15,9 @@
     <a class="primary-btn" href="{{ url_for('download_material_docx', mid=m.id) }}">Word жүктеу</a>
     <button onclick="fontStep(1)">A+</button>
     <button onclick="fontStep(-1)">A−</button>
-    <button onclick="document.body.classList.toggle('contrast')">◐ Контраст</button>
+    <button onclick="readingSpacing(1)">↕ Аралық +</button>
+    <button onclick="readingSpacing(-1)">↕ Аралық −</button>
+    <button onclick="toggleReadingContrast()">◐ Контраст</button>
     <button onclick="document.body.classList.toggle('focus-mode')">◎ Назар режимі</button>
 </div>
 
