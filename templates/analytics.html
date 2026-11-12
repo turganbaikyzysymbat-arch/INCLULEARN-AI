@@ -1,1 +1,317 @@
-{% extends "base.html" %}{% block content %}<div class="page-title"><div><div class="eyebrow">TEACHING INSIGHTS</div><h1>Оқу аналитикасы</h1><p>Материалдар, тапсырмалар және бағалау бойынша жиынтық көрсеткіштер.</p></div></div><div class="quick-grid"><div class="quick-card lilac"><span class="quick-kicker">БЕЙІМДЕЛГЕН МАТЕРИАЛ</span><h3>{{mats}}</h3><p>Сіз жасаған материалдар</p></div><div class="quick-card mint"><span class="quick-kicker">ТАПСЫРМАЛАР</span><h3>{{assigns}}</h3><p>Жарияланған тапсырмалар</p></div><div class="quick-card peach"><span class="quick-kicker">ОҚУШЫ ЖАУАПТАРЫ</span><h3>{{subs}}</h3><p>Жіберілген жауаптар</p></div></div><section class="surface-card"><h2>Бағалау барысы</h2><p>{{reviewed}} / {{subs}} жауап мұғалім тарапынан тексерілген.</p><div style="height:12px;background:#f0edff;border-radius:20px;overflow:hidden"><div style="height:100%;width:{{(reviewed/subs*100) if subs else 0}}%;background:linear-gradient(90deg,#8b70e7,#5fbd9d);border-radius:20px"></div></div></section>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-title">
+    <div>
+        <div class="eyebrow">TEACHING INSIGHTS</div>
+        <h1>Оқу аналитикасы</h1>
+        <p>Оқушылардың нәтижелері және AI мен мұғалім бағалауын салыстыру.</p>
+    </div>
+</div>
+
+<div class="quick-grid">
+    <div class="quick-card lilac">
+        <span class="quick-kicker">БЕЙІМДЕЛГЕН МАТЕРИАЛ</span>
+        <h3>{{ mats }}</h3>
+        <p>Жасалған материалдар</p>
+    </div>
+    <div class="quick-card mint">
+        <span class="quick-kicker">ТАПСЫРМАЛАР</span>
+        <h3>{{ assigns }}</h3>
+        <p>Жарияланған тапсырмалар</p>
+    </div>
+    <div class="quick-card peach">
+        <span class="quick-kicker">ОҚУШЫ ЖАУАПТАРЫ</span>
+        <h3>{{ subs }}</h3>
+        <p>Жіберілген жауаптар</p>
+    </div>
+</div>
+
+<section class="surface-card">
+    <h2>AI және мұғалім бағаларын салыстыру</h2>
+    <div class="quick-grid">
+        <div class="quick-card lilac">
+            <span class="quick-kicker">AI ОРТАША БАҒАСЫ</span>
+            <h3>{{ "%.2f"|format(stats.ai_average or 0) }} / 10</h3>
+        </div>
+        <div class="quick-card mint">
+            <span class="quick-kicker">МҰҒАЛІМ ОРТАША БАҒАСЫ</span>
+            <h3>{{ "%.2f"|format(stats.teacher_average or 0) }} / 10</h3>
+        </div>
+        <div class="quick-card peach">
+            <span class="quick-kicker">ОРТАША АЙЫРМАШЫЛЫҚ</span>
+            <h3>{{ "%.2f"|format(stats.average_difference or 0) }}</h3>
+        </div>
+    </div>
+
+    <p><strong>Бағалары сәйкес келген жауаптар:</strong>
+        {{ stats.matching_count or 0 }} / {{ stats.compared_count or 0 }}
+    </p>
+    <p><strong>Мұғалім тексерген жауаптар:</strong>
+        {{ reviewed }} / {{ subs }}
+    </p>
+</section>
+
+<section class="surface-card">
+    <h2>Оқушылар рейтингі</h2>
+    {% if ranking %}
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Оқушы</th>
+                    <th>Жауап саны</th>
+                    <th>AI орташа бағасы</th>
+                    <th>Мұғалім орташа бағасы</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in ranking %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ item.student }}</td>
+                    <td>{{ item.answer_count }}</td>
+                    <td>{{ "%.2f"|format(item.ai_average) if item.ai_average is not none else "—" }} / 10</td>
+                    <td>{{ "%.2f"|format(item.teacher_average) if item.teacher_average is not none else "—" }} / 10</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>Әзірге оқушылардың нәтижелері жоқ.</p>
+    {% endif %}
+</section>
+
+
+<section class="surface-card">
+    <h2>Оқушылардың жеке нәтижелері</h2>
+    {% if detailed_results %}
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Оқушы</th>
+                    <th>Тапсырма</th>
+                    <th>AI бағасы</th>
+                    <th>Мұғалім бағасы</th>
+                    <th>Айырмашылық</th>
+                    <th>Мәртебе</th>
+                    <th>Күні</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in detailed_results %}
+                <tr>
+                    <td>{{ item.student }}</td>
+                    <td>{{ item.task_title }}</td>
+                    <td>{{ "%.1f"|format(item.proposed_score) if item.proposed_score is not none else "—" }} / 10</td>
+                    <td>{{ "%.1f"|format(item.teacher_score) if item.teacher_score is not none else "—" }} / 10</td>
+                    <td>{{ "%.1f"|format(item.difference) if item.difference is not none else "—" }}</td>
+                    <td>{{ "Тексерілді" if item.status == "reviewed" else "Күтуде" }}</td>
+                    <td>{{ item.created_at }}</td>
+                </tr>
+                {% if item.criterion_results_parsed %}
+                <tr>
+                    <td colspan="7">
+                        <strong>Критериалды бағалау</strong>
+                        <form method="POST" action="{{ url_for('review_game_criteria', result_id=item.id) }}">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Бағалау критерийі</th>
+                                    <th>Дескриптор</th>
+                                    <th>Максималды балл</th>
+                                    <th>AI бағасы</th>
+                                    <th>Мұғалім бағасы</th>
+                                    <th>Айырмашылық</th>
+                                    <th>Кері байланыс</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for criterion in item.criterion_results_parsed %}
+                                <tr>
+                                    <td>{{ criterion.criterion }}</td>
+                                    <td>{{ criterion.descriptor or "—" }}</td>
+                                    <td>{{ criterion.maximum }}</td>
+                                    <td>{{ criterion.earned }} / {{ criterion.maximum }}</td>
+                                    <td>
+                                        <input type="number" name="criterion_score_{{ loop.index0 }}"
+                                               min="0" max="{{ criterion.maximum }}" step="0.5"
+                                               value="{{ criterion.teacher_earned if criterion.teacher_earned is defined else criterion.earned }}"
+                                               style="width:75px">
+                                        / {{ criterion.maximum }}
+                                    </td>
+                                    <td>
+                                        {% if criterion.teacher_earned is defined %}
+                                            {{ "%.1f"|format((criterion.teacher_earned - criterion.earned)|abs) }} балл
+                                        {% else %}—{% endif %}
+                                    </td>
+                                    <td>
+                                        {{ criterion.feedback or ("Дұрыс орындалды." if criterion.correct else "Қатені түзетіп, қайта орындау ұсынылады.") }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <button type="submit" class="primary-btn">Мұғалім бағасын сақтау</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>Әзірге жеке нәтижелер жоқ.</p>
+    {% endif %}
+</section>
+
+
+<section class="surface-card">
+    <h2>Ойын нәтижесі мен мұғалім бағасының диаграммасы</h2>
+    <canvas id="assessmentChart" height="110"></canvas>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const canvas = document.getElementById("assessmentChart");
+    if (!canvas || typeof Chart === "undefined") return;
+
+    new Chart(canvas, {
+        type: "bar",
+        data: {
+            labels: ["Ойын нәтижесі", "Мұғалім бағасы"],
+            datasets: [{
+                label: "Орташа нәтиже (10 балл)",
+                data: [
+                    {{ game_stats.average_score_10 or 0 }},
+                    {{ game_stats.teacher_average or 0 }}
+                ],
+                backgroundColor: ["#9b8bd8", "#65b99b"],
+                borderRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true, max: 10 }
+            }
+        }
+    });
+});
+</script>
+
+
+<section class="surface-card">
+    <h2>Ойын нәтижелерінің аналитикасы</h2>
+    <div class="quick-grid">
+        <div class="quick-card lilac">
+            <span class="quick-kicker">ОРЫНДАЛҒАН ОЙЫНДАР</span>
+            <h3>{{ game_stats.count or 0 }}</h3>
+        </div>
+        <div class="quick-card mint">
+            <span class="quick-kicker">ОРТАША ОЙЫН НӘТИЖЕСІ</span>
+            <h3>{{ "%.1f"|format(game_stats.average_percentage or 0) }}%</h3>
+        </div>
+        <div class="quick-card peach">
+            <span class="quick-kicker">МҰҒАЛІМНІҢ ОРТАША БАҒАСЫ</span>
+            <h3>{{ "%.1f"|format(game_stats.teacher_average) if game_stats.teacher_average is not none else "—" }} / 10</h3>
+        </div>
+    </div>
+
+    <h3>Ойындар бойынша оқушылар рейтингі</h3>
+    {% if game_ranking %}
+    <div style="overflow-x:auto">
+        <table>
+            <thead><tr><th>№</th><th>Оқушы</th><th>Ойын саны</th><th>Орташа нәтиже</th><th>Мұғалім бағасы</th></tr></thead>
+            <tbody>
+            {% for item in game_ranking %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ item.student }}</td>
+                <td>{{ item.game_count }}</td>
+                <td>{{ "%.1f"|format(item.average_percentage or 0) }}%</td>
+                <td>{{ "%.1f"|format(item.teacher_average) if item.teacher_average is not none else "—" }} / 10</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>Әзірге ойын нәтижелері жоқ.</p>
+    {% endif %}
+
+    <h3>Оқушылардың жеке ойын нәтижелері</h3>
+    {% if game_results %}
+    <div style="overflow-x:auto">
+        <table>
+            <thead><tr><th>Оқушы</th><th>Ойын</th><th>Пән</th><th>Ұпай</th><th>Нәтиже</th><th>Мұғалім бағасы</th><th>Күні</th></tr></thead>
+            <tbody>
+            {% for item in game_results %}
+            <tr>
+                <td>{{ item.student }}</td>
+                <td>{{ item.game_title }}</td>
+                <td>{{ item.subject or "—" }}</td>
+                <td>{{ item.score }} / {{ item.total }}</td>
+                <td>{{ item.percentage }}%</td>
+                <td>{{ "%.1f"|format(item.teacher_score) if item.teacher_score is not none else "—" }} / 10</td>
+                <td>{{ item.created_at }}</td>
+            </tr>
+            {% if item.criterion_results_parsed %}
+            <tr>
+                <td colspan="7">
+                    <strong>Критериалды бағалау</strong>
+                    <form method="POST" action="{{ url_for('review_game_criteria', result_id=item.id) }}">
+                        <div style="overflow-x:auto">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Бағалау критерийі</th>
+                                        <th>Дескриптор</th>
+                                        <th>Максималды балл</th>
+                                        <th>AI бағасы</th>
+                                        <th>Мұғалім бағасы</th>
+                                        <th>Кері байланыс</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for criterion in item.criterion_results_parsed %}
+                                    <tr>
+                                        <td>{{ criterion.criterion }}</td>
+                                        <td>{{ criterion.descriptor or "—" }}</td>
+                                        <td>{{ criterion.maximum }}</td>
+                                        <td>{{ criterion.earned }}</td>
+                                        <td>
+                                            <input type="number"
+                                                name="criterion_score_{{ loop.index0 }}"
+                                                min="0" max="{{ criterion.maximum }}"
+                                                step="0.5"
+                                                value="{{ criterion.teacher_earned if criterion.teacher_earned is defined else criterion.earned }}"
+                                                style="width:75px">
+                                            / {{ criterion.maximum }}
+                                        </td>
+                                        <td>{{ criterion.feedback or ("Дұрыс орындалды." if criterion.correct else "Қатені түзету ұсынылады.") }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="submit" class="primary-btn">Мұғалім бағасын сақтау</button>
+                    </form>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>Оқушылар ойын сілтемесі арқылы тапсырманы орындағаннан кейін нәтижелері осында көрінеді.</p>
+    {% endif %}
+</section>
+
+{% endblock %}

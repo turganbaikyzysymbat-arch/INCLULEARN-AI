@@ -15,11 +15,24 @@
 
 <script>
 const gameData = {{ game | tojson }};
+const gameToken = {{ game_info.share_token | tojson }};
 const box = document.getElementById("game-questions");
 const result = document.getElementById("game-result");
+
 let current = 0;
 let score = 0;
 let answered = false;
+let criterionResults = [];
+
+function createButton(text, action, className = "secondary-btn") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = text;
+    button.style.margin = "8px 5px";
+    button.addEventListener("click", action);
+    return button;
+}
 
 function showQuestion() {
     answered = false;
@@ -27,64 +40,151 @@ function showQuestion() {
     box.innerHTML = "";
 
     const heading = document.createElement("h3");
-    heading.textContent = `Сұрақ ${current + 1} / ${gameData.questions.length}`;
+    heading.textContent = `Тапсырма ${current + 1} / ${gameData.questions.length}`;
     box.appendChild(heading);
+
+    const points = document.createElement("p");
+    points.textContent = `Максималды балл: ${q.points || 1}`;
+    box.appendChild(points);
 
     const question = document.createElement("p");
     question.textContent = q.question;
     box.appendChild(question);
 
-    q.options.forEach((option, index) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "secondary-btn";
-        button.style.display = "block";
-        button.style.width = "100%";
-        button.style.margin = "10px 0";
-        button.textContent = option;
-        button.addEventListener("click", () => checkAnswer(index));
-        box.appendChild(button);
-    });
+    const answerArea = document.createElement("div");
+    answerArea.id = "answer-area";
+    box.appendChild(answerArea);
+
+    if (gameData.game_type === "fill_blank") {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.id = "blank-answer";
+        input.placeholder = "Жауабыңызды енгізіңіз";
+        input.style.width = "100%";
+        input.style.padding = "12px";
+        answerArea.appendChild(input);
+        answerArea.appendChild(createButton("Жауапты тексеру", checkBlank, "primary-btn"));
+
+    } else if (gameData.game_type === "put_order") {
+        const items = q.items || [];
+        const selections = [];
+
+        items.forEach((item, index) => {
+            const row = document.createElement("div");
+            row.style.margin = "12px 0";
+
+            const label = document.createElement("p");
+            label.textContent = item;
+            row.appendChild(label);
+
+            const select = document.createElement("select");
+            select.style.padding = "10px";
+            select.style.width = "100%";
+
+            const empty = document.createElement("option");
+            empty.value = "";
+            empty.textContent = "Ретін таңдаңыз";
+            select.appendChild(empty);
+
+            for (let i = 1; i <= items.length; i++) {
+                const option = document.createElement("option");
+                option.value = i;
+                option.textContent = i;
+                select.appendChild(option);
+            }
+
+            selections.push(select);
+            row.appendChild(select);
+            answerArea.appendChild(row);
+        });
+
+        answerArea.appendChild(createButton("Ретті тексеру", () => checkOrder(selections), "primary-btn"));
+
+    } else {
+        (q.options || []).forEach((option, index) => {
+            answerArea.appendChild(createButton(option, () => checkChoice(index)));
+        });
+    }
 
     const feedback = document.createElement("p");
     feedback.id = "feedback";
     box.appendChild(feedback);
 
-    const next = document.createElement("button");
-    next.type = "button";
-    next.className = "primary-btn";
-    next.textContent = current === gameData.questions.length - 1
-        ? "Нәтижені көру" : "Келесі сұрақ →";
-    next.disabled = true;
+    const next = createButton(
+        current === gameData.questions.length - 1 ? "Нәтижені көру" : "Келесі тапсырма →",
+        () => {
+            current++;
+            if (current < gameData.questions.length) showQuestion();
+            else showResult();
+        },
+        "primary-btn"
+    );
     next.id = "next-question";
-    next.addEventListener("click", () => {
-        current++;
-        if (current < gameData.questions.length) showQuestion();
-        else showResult();
-    });
+    next.disabled = true;
     box.appendChild(next);
 }
 
-function checkAnswer(index) {
+function finishAnswer(correct, explanation = "") {
     if (answered) return;
     answered = true;
 
     const q = gameData.questions[current];
-    const correct = index === q.answer;
-    if (correct) score++;
-
-    const buttons = box.querySelectorAll("button.secondary-btn");
-    buttons.forEach((button, i) => {
-        button.disabled = true;
-        if (i === q.answer) button.style.border = "2px solid #269b68";
-        else if (i === index) button.style.border = "2px solid #d65b5b";
+    const earned = correct ? (q.points || 1) : 0;
+    score += earned;
+    criterionResults.push({
+        criterion: q.criterion || "Тапсырманы орындау",
+        descriptor: q.descriptor || "Тапсырмаға дұрыс жауап береді",
+        earned: earned,
+        maximum: q.points || 1,
+        correct: Boolean(correct),
+        feedback: explanation || q.explanation || ""
     });
 
-    document.getElementById("feedback").textContent =
-        (correct ? "Дұрыс жауап! " : "Қате жауап. Дұрыс жауап: " + q.options[q.answer] + ". ")
-        + (q.explanation || "");
+    document.querySelectorAll("#answer-area button, #answer-area input, #answer-area select")
+        .forEach(el => el.disabled = true);
+
+    const feedback = document.getElementById("feedback");
+    feedback.textContent =
+        (correct ? `Дұрыс! +${earned} балл. ` : "Қате жауап. 0 балл. ") +
+        `Критерий: ${q.criterion || "Тапсырманы дұрыс орындау"}. ` +
+        (explanation || q.explanation || "");
 
     document.getElementById("next-question").disabled = false;
+}
+
+function checkChoice(index) {
+    const q = gameData.questions[current];
+    const correct = index === q.answer;
+    finishAnswer(correct);
+}
+
+function checkBlank() {
+    const q = gameData.questions[current];
+    const input = document.getElementById("blank-answer");
+    const answer = input.value.trim().toLowerCase();
+    const accepted = (q.accepted_answers || []).map(x => String(x).trim().toLowerCase());
+    finishAnswer(accepted.includes(answer));
+}
+
+function checkOrder(selections) {
+    const values = selections.map(select => Number(select.value));
+    const valid = values.every(value => value > 0) &&
+        new Set(values).size === values.length;
+
+    if (!valid) {
+        document.getElementById("feedback").textContent =
+            "Әр қадамға қайталанбайтын реттік нөмір беріңіз.";
+        return;
+    }
+
+    const q = gameData.questions[current];
+    const userOrder = selections
+        .map((select, index) => ({index, position: Number(select.value)}))
+        .sort((a, b) => a.position - b.position)
+        .map(item => item.index);
+
+    const correct = JSON.stringify(userOrder) === JSON.stringify(q.answer);
+    finishAnswer(correct);
 }
 
 function showResult() {
@@ -92,25 +192,54 @@ function showResult() {
     result.hidden = false;
     result.innerHTML = "";
 
+    const totalPoints = gameData.total_points ||
+        gameData.questions.reduce((sum, q) => sum + (q.points || 1), 0);
+
+    const percentage = Math.round(score / totalPoints * 100);
+
     const heading = document.createElement("h2");
     heading.textContent = "Ойын аяқталды!";
 
     const scoreText = document.createElement("p");
-    scoreText.textContent = `Сіздің нәтижеңіз: ${score} / ${gameData.questions.length}`;
+    scoreText.textContent = `Сіздің нәтижеңіз: ${score} / ${totalPoints} балл (${percentage}%)`;
 
-    const retry = document.createElement("button");
-    retry.type = "button";
-    retry.className = "primary-btn";
-    retry.textContent = "Қайта ойнау";
-    retry.addEventListener("click", () => {
+    const level = document.createElement("p");
+    level.textContent = `Күрделілік деңгейі: ${gameData.difficulty || "medium"}`;
+
+    const criteriaHeading = document.createElement("h3");
+    criteriaHeading.textContent = "Бағалау критерийлері";
+
+    result.append(heading, scoreText, level, criteriaHeading);
+
+    gameData.questions.forEach((q, index) => {
+        const item = document.createElement("p");
+        item.textContent = `${index + 1}. ${q.criterion || "Тапсырманы орындау"} — ${q.points || 1} балл`;
+        result.appendChild(item);
+    });
+
+    const studentName = prompt("Атыңызды енгізіңіз:");
+    if (studentName && studentName.trim()) {
+        fetch("/game-result/" + encodeURIComponent(gameToken), {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                student_name: studentName.trim(),
+                score: score,
+                total: totalPoints,
+                criterion_results: criterionResults
+            })
+        }).then(response => {
+            if (!response.ok) console.error("Нәтиже сақталмады.");
+        }).catch(error => console.error("Қате:", error));
+    }
+
+    result.appendChild(createButton("Қайта ойнау", () => {
         current = 0;
         score = 0;
         box.hidden = false;
         result.hidden = true;
         showQuestion();
-    });
-
-    result.append(heading, scoreText, retry);
+    }, "primary-btn"));
 }
 
 showQuestion();

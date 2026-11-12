@@ -53,23 +53,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!content || !tabs || !panels) return;
 
-    const headings = [...content.querySelectorAll('h2')];
-    const excluded = /тапсырма|критериалды бағалау|өзін-өзі тексеру|мұғалімге ескерту/i;
-
-    if (!headings.length) return;
+    const allowedTitles = [
+        "Жеңілдетілген мәтін",
+        "Қадамдық түсіндіру",
+        "Визуалды тірек",
+        "Тірек сөздер",
+        "Оқуға ыңғайлы режим",
+        "Қысқа тапсырмалар",
+        "Қосымша мысалдар",
+        "Есте сақтауға көмек"
+    ];
 
     const sections = [];
     let current = null;
 
     [...content.children].forEach(node => {
         if (node.tagName === 'H2') {
-            current = {
-                title: node.textContent.replace(/^\d+[\s.)-]*/, '').trim(),
-                nodes: []
-            };
+            const title = node.textContent.replace(/^\\d+[\\s.)-]*/, '').trim();
+            const matchedTitle = allowedTitles.find(
+                name => name.toLowerCase() === title.toLowerCase()
+            );
 
-            if (!excluded.test(current.title)) sections.push(current);
-            else current = null;
+            current = matchedTitle ? { title: matchedTitle, nodes: [] } : null;
+
+            if (current) sections.push(current);
         } else if (current) {
             current.nodes.push(node.cloneNode(true));
         }

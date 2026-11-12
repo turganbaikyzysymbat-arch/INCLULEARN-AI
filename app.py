@@ -65,6 +65,14 @@ def init_db():
         share_token TEXT UNIQUE NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS game_results(
+        id INTEGER PRIMARY KEY,
+        game_id INTEGER NOT NULL,
+        student_name TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        total INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS assignments(id INTEGER PRIMARY KEY, material_id INTEGER, teacher_id INTEGER, class_name TEXT, criteria TEXT, status TEXT DEFAULT 'assigned', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS submissions(id INTEGER PRIMARY KEY, assignment_id INTEGER, student_id INTEGER, answer TEXT, ai_feedback TEXT, proposed_score REAL, teacher_score REAL, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, name TEXT, email TEXT, category TEXT, message TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
@@ -73,6 +81,16 @@ def init_db():
     CREATE TABLE IF NOT EXISTS ai_chats(id INTEGER PRIMARY KEY, user_id INTEGER, question TEXT, answer TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE IF NOT EXISTS textbook_topics(id INTEGER PRIMARY KEY, textbook_id INTEGER, topic TEXT, objective TEXT DEFAULT '');
     """)
+    columns = [row["name"] for row in c.execute("PRAGMA table_info(game_results)").fetchall()]
+    if "teacher_score" not in columns:
+        c.execute("ALTER TABLE game_results ADD COLUMN teacher_score REAL")
+    if "criterion_results" not in columns:
+        c.execute("ALTER TABLE game_results ADD COLUMN criterion_results TEXT DEFAULT '[]'")
+
+    submission_columns = [row["name"] for row in c.execute("PRAGMA table_info(submissions)").fetchall()]
+    if "teacher_comment" not in submission_columns:
+        c.execute("ALTER TABLE submissions ADD COLUMN teacher_comment TEXT")
+
     # Demo admin account. Change password after first login.
     if not c.execute("SELECT id FROM users WHERE email=?", ("admin@inclulearn.local",)).fetchone():
         c.execute("INSERT INTO users(name,email,password,role) VALUES(?,?,?,?)",
@@ -216,7 +234,7 @@ def adapt():
         c=db(); cur=c.execute("INSERT INTO materials(teacher_id,title,grade,subject,topic,original,adapted,support) VALUES(?,?,?,?,?,?,?,?)",(session["uid"],title,grade,subject,topic,original,adapted,support)); mid=cur.lastrowid; c.commit(); c.close()
         return redirect(url_for("material",mid=mid))
     return render_template("adapt.html",subjects=SUBJECTS)
-def ai_generate(system_prompt, user_prompt, max_chars=24000):
+def ai_generate(system_prompt, user_prompt, max_chars=24000, min_chars=120, max_tokens=10000):
     """Generate content only through the configured Anthropic Claude API."""
     key=os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if not key:
@@ -229,12 +247,12 @@ def ai_generate(system_prompt, user_prompt, max_chars=24000):
     client=Anthropic(api_key=key)
     response=client.messages.create(
         model=model,
-        max_tokens=5000,
+        max_tokens=max_tokens,
         system=system_prompt,
         messages=[{"role":"user", "content":user_prompt[:max_chars]}]
     )
     result="\n".join(block.text for block in response.content if getattr(block, "type", None)=="text").strip()
-    if len(result)<120:
+    if len(result) < min_chars:
         raise RuntimeError("Claude жауабы тым қысқа немесе бос")
     return result
 
@@ -286,7 +304,7 @@ def adapt_text(text, support, grade, subject="", topic=""):
 Егер ол таңдалмаса, тапсырмалар мен тесттер қоспа.
 Критериалды бағалау бөлімін қоспа.
 Кесте, сәндік символдар және көлденең сызықтар қолданба.
-Markdown тақырыпшалары мен қалың қаріпті қолдануға болады.
+"Әр таңдалған бейімдеуді дәл оның интерфейстегі атауымен жеке ## тақырыпшадан баста. Мысалы: ## Жеңілдетілген мәтін, ## Қадамдық түсіндіру, ## Визуалды тірек, ## Тірек сөздер, ## Оқуға ыңғайлы режим, ## Қысқа тапсырмалар, ## Қосымша мысалдар, ## Есте сақтауға көмек. Тақырыпшалардан кейін тек сол бейімдеуге қатысты мазмұн жаз. Markdown тақырыпшаларын тек бөлім атауларына қолдан. Қалың қаріп, маркер және сәндік символдар қолданба. Тек таза мәтін мен дұрыс тыныс белгілерін пайдалан."
 Бір ойды қайталама. Қысқа абзацтар жаз.
 """
 
@@ -296,6 +314,10 @@ Markdown тақырыпшалары мен қалың қаріпті қолда�
         18000
     )
 
+    result = result.replace("**", "").replace("__", "").replace("`", "")
+    result = re.sub(r"(?m)^\s*[-*]\s+", "", result)
+    result = re.sub(r"(?m)^\s*[-*_]{3,}\s*$", "", result)
+    result = re.sub(r"\n{3,}", "\n\n", result).strip()
     if len(result) < 120 or result.strip() == text.strip():
         raise RuntimeError("AI жауабы тым қысқа немесе бастапқы мәтін өзгертілмеген")
 
@@ -423,53 +445,124 @@ def assign(mid):
     return redirect(url_for("dashboard"))
 
 
-@app.route("/assignment/<int:aid>",methods=["GET","POST"])
+@app.route("/assignment/<int:aid>", methods=["GET", "POST"])
 @login_required
 def assignment(aid):
-    c=db(); a=c.execute("SELECT a.*,m.title,m.adapted,m.grade,m.subject FROM assignments a JOIN materials m ON m.id=a.material_id WHERE a.id=?",(aid,)).fetchone()
-    if not a: c.close(); return "Тапсырма табылмады",404
-    if request.method=="POST" and session["role"]=="student":
-        answer=request.form.get("answer","").strip()
-        c.execute("INSERT INTO submissions(assignment_id,student_id,answer,ai_feedback,proposed_score) VALUES(?,?,?,?,?)",(aid,session["uid"],answer,"Жауап мұғалімнің критерийлері бойынша тексеруге жіберілді.",None)); c.commit(); flash("Жауап жіберілді.","success")
-    subs=c.execute("SELECT s.*,u.name student FROM submissions s JOIN users u ON u.id=s.student_id WHERE assignment_id=?",(aid,)).fetchall() if session["role"] in ("teacher","admin") else []
-    c.close(); return render_template("assignment.html",a=a,subs=subs)
-@app.route("/review/<int:sid>",methods=["POST"])
-@login_required
-@role_required("teacher","admin")
-def review(sid):
-    score=request.form.get("score"); feedback=request.form.get("feedback","")
-    c=db(); c.execute("UPDATE submissions SET teacher_score=?,ai_feedback=?,status='reviewed' WHERE id=?",(score,feedback,sid)); c.commit(); c.close()
-    flash("Мұғалім бағалауы сақталды.","success"); return redirect(request.referrer or url_for("dashboard"))
-@app.route("/textbooks")
-@login_required
-def textbooks():
-    grade=request.args.get("grade"); subject=request.args.get("subject"); lang=request.args.get("language","kk")
-    c=db(); rows=c.execute("SELECT * FROM textbooks WHERE (?='' OR grade=?) AND (?='' OR subject=?) AND language=? ORDER BY grade,subject,title",(grade or "",grade or "",subject or "",subject or "",lang)).fetchall(); c.close()
-    return render_template("textbooks.html",rows=rows,subjects=SUBJECTS,grade=grade or "",subject=subject or "",language=lang)
-@app.route("/feedback",methods=["POST"])
-def feedback():
-    c=db(); c.execute("INSERT INTO feedback(name,email,category,message) VALUES(?,?,?,?)",(request.form.get("name",""),request.form.get("email",""),request.form.get("category","Ұсыныс"),request.form.get("message",""))); c.commit(); c.close()
-    flash("Кері байланысыңыз қабылданды. Рақмет!","success"); return redirect(request.referrer or url_for("home"))
-@app.route("/ai-status")
-@login_required
-@role_required("teacher","admin")
-def ai_status():
-    return jsonify(connected=bool(os.environ.get("ANTHROPIC_API_KEY")),provider="claude",model=os.environ.get("AI_MODEL", "claude-sonnet-5-5"))
-@app.route("/health")
-def health(): return jsonify(status="ok",product="IncluLearn AI",version="6.6")
-@app.route("/assistant",methods=["GET","POST"])
-@login_required
-def assistant():
-    answer=None
-    if request.method=="POST":
-        q=request.form.get("question","").strip()
-        if q:
+    c = db()
+    a = c.execute("""
+        SELECT a.*, m.title, m.adapted, m.grade, m.subject
+        FROM assignments a
+        JOIN materials m ON m.id = a.material_id
+        WHERE a.id = ?
+    """, (aid,)).fetchone()
+
+    if not a:
+        c.close()
+        return "Тапсырма табылмады", 404
+
+    if request.method == "POST" and session["role"] == "student":
+        answer = request.form.get("answer", "").strip()
+
+        if not answer:
+            flash("Алдымен жауабыңызды енгізіңіз.", "error")
+        else:
+            criteria = a["criteria"] or "Жауаптың дұрыстығы, толықтығы және тақырыпты түсіну деңгейі."
+            system_prompt = (
+                "Сен тәжірибелі мұғалім және критериалды бағалау сарапшысысың. "
+                "Оқушы жауабын тек берілген критерийлер бойынша бағала. "
+                "0-ден 10-ға дейін әділ балл қой. "
+                "Нақты қателерін, дұрыс тұстарын және жақсарту жолдарын түсіндір. "
+                "Тек жарамды JSON қайтар, Markdown қолданба. "
+                'Формат: {"score": 0, "feedback": "толық түсіндірме"}'
+            )
+            user_prompt = (
+                f"Пән: {a['subject']}\nСынып: {a['grade']}\n"
+                f"Тақырып: {a['title']}\n"
+                f"Оқу материалы: {a['adapted'] or ''}\n"
+                f"Бағалау критерийлері: {criteria}\n"
+                f"Оқушы жауабы: {answer}"
+            )
+
+            proposed_score = None
+            ai_feedback = "AI бағалауы уақытша орындалмады. Мұғалім қолмен тексере алады."
+
             try:
-                answer=ai_generate("Сен IncluLearn AI платформасының қазақ тілінде жауап беретін білім беру көмекшісісің. Қысқа, нақты, жас ерекшелігіне сай жауап бер. Оқушының диагнозын анықтама және жеке дерек сұрама.",q,8000)
-                c=db(); c.execute("INSERT INTO ai_chats(user_id,question,answer) VALUES(?,?,?)",(session["uid"],q,answer)); c.commit(); c.close()
-            except Exception as e: flash("AI көмекші қатесі: "+str(e)[:180],"error")
-    c=db(); history=c.execute("SELECT * FROM ai_chats WHERE user_id=? ORDER BY id DESC LIMIT 8",(session["uid"],)).fetchall(); c.close()
-    return render_template("assistant.html",answer=answer,history=history)
+                raw = ai_generate(system_prompt, user_prompt, 12000)
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+                if not match:
+                    raise ValueError("AI жауабынан JSON табылмады.")
+                result = json.loads(match.group())
+                proposed_score = float(result["score"])
+                if not 0 <= proposed_score <= 10:
+                    raise ValueError("AI бағасы 0–10 аралығында болуы керек.")
+                ai_feedback = str(result["feedback"]).strip()
+            except Exception:
+                app.logger.exception("Automatic submission assessment failed")
+
+            c.execute("""
+                INSERT INTO submissions
+                (assignment_id, student_id, answer, ai_feedback, proposed_score)
+                VALUES (?, ?, ?, ?, ?)
+            """, (aid, session["uid"], answer, ai_feedback, proposed_score))
+            c.commit()
+            flash("Жауап AI тексеруінен өтті және мұғалімге жіберілді." if proposed_score is not None else "Жауап жіберілді. AI бағалауы орындалмады, мұғалім тексере алады.", "success")
+
+    subs = []
+    if session["role"] in ("teacher", "admin"):
+        if session["role"] == "admin":
+            subs = c.execute("""
+                SELECT s.*, u.name AS student FROM submissions s
+                JOIN users u ON u.id = s.student_id
+                WHERE s.assignment_id = ?
+            """, (aid,)).fetchall()
+        elif a["teacher_id"] == session["uid"]:
+            subs = c.execute("""
+                SELECT s.*, u.name AS student FROM submissions s
+                JOIN users u ON u.id = s.student_id
+                WHERE s.assignment_id = ?
+            """, (aid,)).fetchall()
+        else:
+            c.close()
+            return "Бұл тапсырманы көруге рұқсатыңыз жоқ.", 403
+
+    c.close()
+    return render_template("assignment.html", a=a, subs=subs)
+
+
+@app.route("/review/<int:sid>", methods=["POST"])
+@login_required
+@role_required("teacher", "admin")
+def review(sid):
+    try:
+        score = float(request.form.get("score", ""))
+        if not 0 <= score <= 10:
+            raise ValueError
+    except (TypeError, ValueError):
+        flash("Баға 0 мен 10 аралығында болуы керек.", "error")
+        return redirect(request.referrer or url_for("dashboard"))
+
+    comment = request.form.get("feedback", "").strip()
+    c = db()
+    item = c.execute("""
+        SELECT s.id, a.teacher_id
+        FROM submissions s
+        JOIN assignments a ON a.id = s.assignment_id
+        WHERE s.id = ?
+    """, (sid,)).fetchone()
+
+    if not item or (session["role"] != "admin" and item["teacher_id"] != session["uid"]):
+        c.close()
+        return "Бұл жауапты бағалауға рұқсатыңыз жоқ.", 403
+
+    c.execute(
+        "UPDATE submissions SET teacher_score=?, teacher_comment=?, status='reviewed' WHERE id=?",
+        (score, comment, sid)
+    )
+    c.commit()
+    c.close()
+    flash("Мұғалім бағасы мен пікірі сақталды.", "success")
+    return redirect(request.referrer or url_for("dashboard"))
+
 
 @app.route("/assessment",methods=["GET","POST"])
 @login_required
@@ -498,14 +591,128 @@ def assessment_analyze():
 
 @app.route("/analytics")
 @login_required
-@role_required("teacher","admin")
+@role_required("teacher", "admin")
 def analytics():
-    c=db(); uid=session["uid"]
-    mats=c.execute("SELECT COUNT(*) n FROM materials WHERE teacher_id=?",(uid,)).fetchone()["n"]
-    assigns=c.execute("SELECT COUNT(*) n FROM assignments WHERE teacher_id=?",(uid,)).fetchone()["n"]
-    subs=c.execute("SELECT COUNT(*) n FROM submissions s JOIN assignments a ON a.id=s.assignment_id WHERE a.teacher_id=?",(uid,)).fetchone()["n"]
-    reviewed=c.execute("SELECT COUNT(*) n FROM submissions s JOIN assignments a ON a.id=s.assignment_id WHERE a.teacher_id=? AND s.status='reviewed'",(uid,)).fetchone()["n"]
-    c.close(); return render_template("analytics.html",mats=mats,assigns=assigns,subs=subs,reviewed=reviewed)
+    c = db()
+    uid = session["uid"]
+    role = session["role"]
+
+    mats = c.execute(
+        "SELECT COUNT(*) n FROM materials WHERE teacher_id=? OR ?='admin'",
+        (uid, role)
+    ).fetchone()["n"]
+
+    assigns = c.execute(
+        "SELECT COUNT(*) n FROM assignments WHERE teacher_id=? OR ?='admin'",
+        (uid, role)
+    ).fetchone()["n"]
+
+    subs = c.execute("""
+        SELECT COUNT(*) n FROM submissions s
+        JOIN assignments a ON a.id=s.assignment_id
+        WHERE a.teacher_id=? OR ?='admin'
+    """, (uid, role)).fetchone()["n"]
+
+    reviewed = c.execute("""
+        SELECT COUNT(*) n FROM submissions s
+        JOIN assignments a ON a.id=s.assignment_id
+        WHERE (a.teacher_id=? OR ?='admin') AND s.status='reviewed'
+    """, (uid, role)).fetchone()["n"]
+
+    stats = c.execute("""
+        SELECT
+            AVG(s.proposed_score) AS ai_average,
+            AVG(s.teacher_score) AS teacher_average,
+            AVG(ABS(s.proposed_score-s.teacher_score)) AS average_difference,
+            SUM(CASE WHEN ABS(s.proposed_score-s.teacher_score) < 0.01 THEN 1 ELSE 0 END) AS matching_count,
+            COUNT(CASE WHEN s.proposed_score IS NOT NULL AND s.teacher_score IS NOT NULL THEN 1 END) AS compared_count
+        FROM submissions s
+        JOIN assignments a ON a.id=s.assignment_id
+        WHERE (a.teacher_id=? OR ?='admin')
+    """, (uid, role)).fetchone()
+
+    ranking = c.execute("""
+        SELECT u.name AS student,
+               COUNT(s.id) AS answer_count,
+               AVG(s.proposed_score) AS ai_average,
+               AVG(s.teacher_score) AS teacher_average
+        FROM submissions s
+        JOIN users u ON u.id=s.student_id
+        JOIN assignments a ON a.id=s.assignment_id
+        WHERE (a.teacher_id=? OR ?='admin')
+        GROUP BY s.student_id
+        ORDER BY AVG(s.teacher_score) DESC, AVG(s.proposed_score) DESC
+    """, (uid, role)).fetchall()
+
+    detailed_results = c.execute("""
+        SELECT u.name AS student,
+               m.title AS task_title,
+               s.proposed_score,
+               s.teacher_score,
+               ABS(s.proposed_score - s.teacher_score) AS difference,
+               s.status,
+               s.created_at
+        FROM submissions s
+        JOIN users u ON u.id = s.student_id
+        JOIN assignments a ON a.id = s.assignment_id
+        JOIN materials m ON m.id = a.material_id
+        WHERE a.teacher_id=? OR ?='admin'
+        ORDER BY s.created_at DESC
+    """, (uid, role)).fetchall()
+
+    game_results = c.execute("""
+        SELECT gr.id, gr.student_name AS student,
+               g.title AS game_title, g.subject,
+               gr.score, gr.total, gr.teacher_score, gr.criterion_results,
+               CASE WHEN gr.total > 0
+                    THEN ROUND(gr.score * 100.0 / gr.total, 1)
+                    ELSE 0 END AS percentage,
+               gr.created_at
+        FROM game_results gr
+        JOIN games g ON g.id = gr.game_id
+        WHERE g.teacher_id=? OR ?='admin'
+        ORDER BY gr.created_at DESC
+    """, (uid, role)).fetchall()
+
+    game_stats = c.execute("""
+        SELECT COUNT(*) AS count,
+               AVG(CASE WHEN gr.total > 0
+                   THEN gr.score * 100.0 / gr.total END) AS average_percentage,
+               AVG(CASE WHEN gr.total > 0
+                   THEN gr.score * 10.0 / gr.total END) AS average_score_10,
+               AVG(gr.teacher_score) AS teacher_average
+        FROM game_results gr
+        JOIN games g ON g.id = gr.game_id
+        WHERE g.teacher_id=? OR ?='admin'
+    """, (uid, role)).fetchone()
+
+    game_results = [
+        dict(item, criterion_results_parsed=json.loads(item["criterion_results"] or "[]"))
+        for item in game_results
+    ]
+
+    game_ranking = c.execute("""
+        SELECT gr.student_name AS student,
+               COUNT(*) AS game_count,
+               AVG(CASE WHEN gr.total > 0
+                   THEN gr.score * 100.0 / gr.total END) AS average_percentage,
+               AVG(gr.teacher_score) AS teacher_average
+        FROM game_results gr
+        JOIN games g ON g.id = gr.game_id
+        WHERE g.teacher_id=? OR ?='admin'
+        GROUP BY gr.student_name
+        ORDER BY average_percentage DESC
+    """, (uid, role)).fetchall()
+
+    c.close()
+    return render_template(
+        "analytics.html",
+        mats=mats, assigns=assigns, subs=subs, reviewed=reviewed,
+        stats=stats, ranking=ranking, detailed_results=detailed_results,
+        game_results=game_results, game_stats=game_stats,
+        game_ranking=game_ranking
+    )
+
 
 @app.route("/admin")
 @login_required
@@ -552,51 +759,103 @@ def generate_tool_result(tool, title, grade, subject, topic, details):
     return ai_generate(prompts[tool], user_prompt)
 
 
-def generate_game_data(title, grade, subject, topic, game_type):
+def generate_game_data(title, grade, subject, topic, game_type, difficulty="medium", question_count=5):
     game_names = {
-        "quiz": "төрт нұсқалы тест",
-        "matching": "сәйкестендіру ойыны",
-        "true_false": "дұрыс немесе бұрыс ойыны"
+        "quiz": "күрделі тест",
+        "matching": "сәйкестендіру",
+        "true_false": "дұрыс немесе бұрыс",
+        "fill_blank": "бос орынды толтыру",
+        "put_order": "қадамдарды дұрыс ретке орналастыру"
     }
+
+    difficulties = {
+        "easy": "Жеңіл деңгей: негізгі ұғымдар мен қарапайым тапсырмалар.",
+        "medium": "Орта деңгей: білімді қолдану, салыстыру және түсіндіру.",
+        "hard": "Күрделі деңгей: логикалық есептер, жағдаяттарды талдау, кодты түсіну, қателерді табу және бірнеше қадамды ойлау."
+    }
+
     if game_type not in game_names:
         raise ValueError("Ойын түрі дұрыс таңдалмаған.")
+    if difficulty not in difficulties:
+        difficulty = "medium"
+
+    question_count = max(5, min(int(question_count), 15))
 
     prompt = (
-        "Сен білім беру ойындарын құрастырушы мамансың. "
-        "Қазақ тілінде оқушыға арналған ойын жаса. "
-        "Тек жарамды JSON қайтар, Markdown қолданба. "
+        "Сен тәжірибелі педагог және білім беру ойындарын құрастырушысың. "
+        "Қазақ тілінде сапалы, мазмұнды және оқушыны ойландыратын ойын жаса. "
+        "Тек жарамды JSON қайтар. Markdown және қосымша мәтін жазба. "
+        "Әр сұраққа 1-ден 5-ке дейін difficulty_score бер. "
+        "Әр сұраққа бағалау критерийін және оқушы орындайтын нақты дескрипторды бер. ""Дескриптор өлшенетін нақты әрекет түрінде жазылсын. "
         "JSON құрылымы: "
-        '{"title":"Ойын атауы","questions":['
-        '{"question":"Сұрақ","options":["A","B","C","D"],'
-        '"answer":0,"explanation":"Қысқа түсіндірме"}]} '
-        "answer — дұрыс жауаптың options ішіндегі 0-ден басталатын индексі. "
-        "Дәл 5 сұрақ жаса. Әр сұрақта 4 жауап нұсқасы болсын. "
-        "Ойын түрі: " + game_names[game_type] + ". "
-        "Matching ойынында options ішіне жұптың төрт нұсқасын бер, "
-        "answer индексі дұрыс жұпты көрсетсін. "
-        "True or False ойынында options міндетті түрде "
-        '["Дұрыс", "Бұрыс"] болсын, answer 0 немесе 1 болсын. '
-        "Сұрақтар сынып деңгейіне сай және қатесіз болсын."
+        '{"title":"Ойын атауы","game_type":"' + game_type + '","questions":['
+        '{"question":"Тапсырма мәтіні","options":["A","B","C","D"],'
+        '"answer":0,"accepted_answers":["дұрыс жауап"],'
+        '"explanation":"Неге бұл жауап дұрыс екені",'
+        '"points":2,"criterion":"Бағалау критерийі","descriptor":"Оқушы орындайтын нақты әрекет",'
+        '"difficulty_score":2,"items":["1-қадам","2-қадам"]}]} '
+        "Дәл " + str(question_count) + " тапсырма жаса. "
+        "quiz ойынында төрт жауап нұсқасы болсын, answer дұрыс нұсқаның 0-ден басталатын индексі. "
+        "matching ойынында сұрақ терминді немесе ұғымды сұрасын, options төрт анықтама болсын. "
+        "true_false ойынында options міндетті түрде [\"Дұрыс\", \"Бұрыс\"] болсын, answer 0 немесе 1. "
+        "fill_blank ойынында бос орынды толтыратын қысқа нақты жауап жаса, accepted_answers ішіне дұрыс жауаптың балама жазылуларын енгіз. "
+        "put_order ойынында items ішіне кемінде 4 аралас қадам бер, answer ішіне олардың дұрыс ретін көрсететін индекстер массивін жаз. "
+        "Әр сұраққа points 1-5 аралығында бүтін сан бер. "
+        "Тапсырмалар жаттанды емес, білімді қолдануды және ойлауды талап етсін. "
+        "Сынып деңгейінен асып кетпесін. "
+        + difficulties[difficulty]
     )
+
     user_prompt = (
-        f"Сабақ тақырыбы: {title}\nСынып: {grade}\n"
-        f"Пән: {subject}\nОқу мақсаты: {topic}"
+        f"Ойын атауы: {title}\nСынып: {grade}\n"
+        f"Пән: {subject}\nОқу мақсаты мен тақырып: {topic}\n"
+        f"Ойын түрі: {game_names[game_type]}\n"
+        f"Күрделілік деңгейі: {difficulty}\n"
+        f"Тапсырма саны: {question_count}"
     )
+
     raw = ai_generate(prompt, user_prompt)
-    raw = re.sub(r"^```(?:json)?\\s*|\\s*```$", "", raw.strip())
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
     data = json.loads(raw)
 
-    if not isinstance(data.get("questions"), list) or len(data["questions"]) != 5:
-        raise ValueError("AI бес сұрақтан тұратын ойын жасамады.")
+    if not isinstance(data.get("questions"), list) or len(data["questions"]) != question_count:
+        raise ValueError("AI тапсырмалардың қажетті санын жасамады.")
 
     for q in data["questions"]:
-        if not isinstance(q.get("question"), str) or not isinstance(q.get("options"), list):
-            raise ValueError("Ойын сұрағының құрылымы дұрыс емес.")
-        if len(q["options"]) != (2 if game_type == "true_false" else 4):
-            raise ValueError("Жауап нұсқаларының саны дұрыс емес.")
-        if not isinstance(q.get("answer"), int) or not 0 <= q["answer"] < len(q["options"]):
-            raise ValueError("Дұрыс жауап индексі қате.")
+        if not isinstance(q.get("question"), str):
+            raise ValueError("Тапсырма мәтіні дұрыс емес.")
+
+        q["points"] = max(1, min(int(q.get("points", 1)), 5))
+        q["criterion"] = str(q.get("criterion", "Тапсырманы дұрыс орындау"))
+        q["descriptor"] = str(q.get("descriptor", "Тапсырмаға дұрыс жауап береді"))
+        q["explanation"] = str(q.get("explanation", ""))
+        q["difficulty_score"] = max(1, min(int(q.get("difficulty_score", 1)), 5))
+
+        if game_type in ("quiz", "matching", "true_false"):
+            if not isinstance(q.get("options"), list):
+                raise ValueError("Жауап нұсқалары жоқ.")
+            expected = 2 if game_type == "true_false" else 4
+            if len(q["options"]) != expected:
+                raise ValueError("Жауап нұсқаларының саны дұрыс емес.")
+            if not isinstance(q.get("answer"), int) or not 0 <= q["answer"] < expected:
+                raise ValueError("Дұрыс жауап индексі қате.")
+
+        elif game_type == "fill_blank":
+            if not isinstance(q.get("accepted_answers"), list) or not q["accepted_answers"]:
+                raise ValueError("Бос орынды толтыру жауабы жоқ.")
+            q["accepted_answers"] = [str(x).strip().lower() for x in q["accepted_answers"]]
+
+        elif game_type == "put_order":
+            items = q.get("items")
+            answer = q.get("answer")
+            if not isinstance(items, list) or len(items) < 4:
+                raise ValueError("Ретке орналастыру үшін кемінде төрт қадам қажет.")
+            if not isinstance(answer, list) or sorted(answer) != list(range(len(items))):
+                raise ValueError("Қадамдардың дұрыс реті қате.")
+
     data["game_type"] = game_type
+    data["difficulty"] = difficulty
+    data["total_points"] = sum(q["points"] for q in data["questions"])
     return data
 
 
@@ -625,12 +884,27 @@ def game_creator():
         subject = request.form.get("subject", "Информатика")
         topic = request.form.get("topic", "").strip()
         game_type = request.form.get("game_type", "quiz")
+        difficulty = request.form.get("difficulty", "medium")
+        try:
+            question_count = int(request.form.get("question_count", "5"))
+        except ValueError:
+            question_count = 5
 
-        if not title or not topic:
+        if game_type not in ("quiz", "matching", "true_false", "fill_blank", "put_order"):
+            flash("Ойын түрі дұрыс таңдалмаған.", "error")
+        elif difficulty not in ("easy", "medium", "hard"):
+            flash("Күрделілік деңгейі дұрыс таңдалмаған.", "error")
+        elif question_count not in (5, 10, 15):
+            flash("Тапсырма саны 5, 10 немесе 15 болуы керек.", "error")
+        elif not title or not topic:
             flash("Сабақ тақырыбы мен оқу мақсатын енгізіңіз.", "error")
         else:
             try:
-                game = generate_game_data(title, grade, subject, topic, game_type)
+                game = generate_game_data(
+                    title, grade, subject, topic, game_type,
+                    difficulty=difficulty,
+                    question_count=question_count
+                )
                 token = secrets.token_urlsafe(24)
                 c = db()
                 c.execute(
@@ -650,6 +924,209 @@ def game_creator():
     return render_template("game_creator.html", game=game, subjects=SUBJECTS)
 
 
+@app.route("/game-result/<token>", methods=["POST"])
+def save_game_result(token):
+    data = request.get_json(silent=True) or {}
+    student_name = str(data.get("student_name", "")).strip()[:100]
+    score = data.get("score")
+    total = data.get("total")
+    criterion_results = data.get("criterion_results", [])
+    if not isinstance(criterion_results, list):
+        criterion_results = []
+
+    if not student_name:
+        return {"error": "Оқушының аты қажет"}, 400
+
+    try:
+        score, total = int(score), int(total)
+    except (TypeError, ValueError):
+        return {"error": "Ұпай форматы дұрыс емес"}, 400
+
+    if total < 1 or score < 0 or score > total:
+        return {"error": "Ұпай мәні дұрыс емес"}, 400
+
+    c = db()
+    game = c.execute(
+        "SELECT id FROM games WHERE share_token=?", (token,)
+    ).fetchone()
+
+    if not game:
+        c.close()
+        return {"error": "Ойын табылмады"}, 404
+
+    c.execute(
+        """INSERT INTO game_results
+        (game_id, student_name, score, total, criterion_results)
+        VALUES(?,?,?,?,?)""",
+        (game["id"], student_name, score, total,
+         json.dumps(criterion_results, ensure_ascii=False))
+    )
+    c.commit()
+    c.close()
+    return {"success": True}
+
+
+@app.route("/game-result-review/<int:result_id>", methods=["POST"])
+@login_required
+@role_required("teacher", "admin")
+def review_game_result(result_id):
+    try:
+        teacher_score = float(request.form.get("teacher_score", ""))
+        if teacher_score < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        flash("Мұғалім бағасын дұрыс енгізіңіз.", "error")
+        return redirect(url_for("results"))
+
+    c = db()
+    item = c.execute("""
+        SELECT gr.id, gr.total, g.teacher_id
+        FROM game_results gr
+        JOIN games g ON g.id = gr.game_id
+        WHERE gr.id = ?
+    """, (result_id,)).fetchone()
+
+    if not item or (session["role"] != "admin" and item["teacher_id"] != session["uid"]):
+        c.close()
+        flash("Бұл нәтижені бағалауға рұқсатыңыз жоқ.", "error")
+        return redirect(url_for("results"))
+
+    if teacher_score > 10:
+        c.close()
+        flash("Мұғалім бағасы 10 балдан аспауы керек.", "error")
+        return redirect(url_for("results"))
+
+    c.execute("UPDATE game_results SET teacher_score = ? WHERE id = ?",
+              (teacher_score, result_id))
+    c.commit()
+    c.close()
+    flash("Мұғалім бағасы сақталды.", "success")
+    return redirect(url_for("results"))
+
+
+
+
+@app.route("/analytics/game-result-review/<int:result_id>", methods=["POST"])
+@login_required
+@role_required("teacher", "admin")
+def review_game_criteria(result_id):
+    c = db()
+    item = c.execute("""
+        SELECT gr.criterion_results, g.teacher_id
+        FROM game_results gr
+        JOIN games g ON g.id = gr.game_id
+        WHERE gr.id = ?
+    """, (result_id,)).fetchone()
+
+    if not item or (session["role"] != "admin" and item["teacher_id"] != session["uid"]):
+        c.close()
+        flash("Бұл нәтижені бағалауға рұқсатыңыз жоқ.", "error")
+        return redirect(url_for("analytics"))
+
+    try:
+        criteria = json.loads(item["criterion_results"] or "[]")
+        total_max = 0
+        total_teacher = 0
+
+        for i, criterion in enumerate(criteria):
+            maximum = float(criterion.get("maximum", 0))
+            value = float(request.form.get(f"criterion_score_{i}", 0))
+            if maximum < 0 or value < 0 or value > maximum:
+                raise ValueError
+            criterion["teacher_earned"] = value
+            total_max += maximum
+            total_teacher += value
+
+        teacher_score = round(total_teacher * 10 / total_max, 2) if total_max else 0
+
+        c.execute("""
+            UPDATE game_results
+            SET criterion_results = ?, teacher_score = ?
+            WHERE id = ?
+        """, (json.dumps(criteria, ensure_ascii=False), teacher_score, result_id))
+        c.commit()
+        flash("Критерийлер бойынша мұғалім бағасы сақталды.", "success")
+    except (ValueError, TypeError):
+        flash("Әр критерийге максималды балдан аспайтын ұпай енгізіңіз.", "error")
+
+    c.close()
+    return redirect(url_for("analytics"))
+
+
+@app.route("/game-result-delete/<int:result_id>", methods=["POST"])
+@login_required
+@role_required("teacher", "admin")
+def delete_game_result(result_id):
+    c = db()
+    item = c.execute("""
+        SELECT gr.id, g.teacher_id
+        FROM game_results gr
+        JOIN games g ON g.id = gr.game_id
+        WHERE gr.id = ?
+    """, (result_id,)).fetchone()
+
+    if not item or (session["role"] != "admin" and item["teacher_id"] != session["uid"]):
+        c.close()
+        flash("Бұл нәтижені өшіруге рұқсатыңыз жоқ.", "error")
+        return redirect(url_for("results"))
+
+    c.execute("DELETE FROM game_results WHERE id = ?", (result_id,))
+    c.commit()
+    c.close()
+    flash("Ойын нәтижесі өшірілді.", "success")
+    return redirect(url_for("results"))
+
+
+@app.route("/results")
+@login_required
+@role_required("teacher", "admin")
+def results():
+    c = db()
+    uid = session["uid"]
+    role = session["role"]
+
+    submissions = c.execute("""
+        SELECT s.*, u.name AS student_name, m.title AS material_title,
+               m.subject, m.grade
+        FROM submissions s
+        JOIN assignments a ON a.id = s.assignment_id
+        JOIN materials m ON m.id = a.material_id
+        JOIN users u ON u.id = s.student_id
+        WHERE a.teacher_id = ? OR ? = 'admin'
+        ORDER BY s.created_at DESC
+    """, (uid, role)).fetchall()
+
+    game_results = c.execute("""
+        SELECT gr.*, g.title AS game_title, g.subject, g.grade, g.game_json
+        FROM game_results gr
+        JOIN games g ON g.id = gr.game_id
+        WHERE g.teacher_id = ? OR ? = 'admin'
+        ORDER BY gr.created_at DESC
+    """, (uid, role)).fetchall()
+
+    game_type_names = {
+        "quiz": "Күрделі тест",
+        "matching": "Сәйкестендіру",
+        "true_false": "Дұрыс немесе бұрыс",
+        "fill_blank": "Бос орынды толтыру",
+        "put_order": "Ретін анықтау"
+    }
+    game_results = [
+        dict(item, game_type_name=game_type_names.get(
+            json.loads(item["game_json"]).get("game_type", ""),
+            item["game_title"]
+        ))
+        for item in game_results
+    ]
+
+    c.close()
+    return render_template(
+        "results.html",
+        submissions=submissions,
+        game_results=game_results
+    )
+
+
 @app.route("/play/<token>")
 def play_game(token):
     c = db()
@@ -664,6 +1141,35 @@ def play_game(token):
 
     game_data = json.loads(game["game_json"])
     return render_template("play_game.html", game=game_data, game_info=game)
+
+
+@app.route("/generate-objective", methods=["POST"])
+@login_required
+@role_required("teacher", "admin")
+def generate_objective():
+    data = request.get_json(silent=True) or {}
+    title = str(data.get("title", "")).strip()
+    grade = str(data.get("grade", "7")).strip()
+    subject = str(data.get("subject", "Информатика")).strip()
+
+    if len(title) < 2:
+        return {"error": "Алдымен сабақ тақырыбын енгізіңіз."}, 400
+
+    try:
+        objective = ai_generate(
+            "Сен Қазақстан мектептеріне арналған тәжірибелі педагог және оқу бағдарламасын әзірлеушісің. "
+            "Берілген сынып, пән және тақырып бойынша бір нақты, өлшенетін оқу мақсатын қазақ тілінде құрастыр. "
+            "Оқу мақсаты оқушы орындай алатын әрекеттен басталсын. Қысқа әрі түсінікті бір сөйлем жаз. "
+            "Артық түсіндірме, тақырыпша және нөмір қоспа. Ресми оқу бағдарламасынан алынған деп жалған мәлімдеме жасама.",
+            f"Пән: {subject}. Сынып: {grade}. Сабақ тақырыбы: {title}. "
+            "Осы сабаққа сәйкес оқу мақсатын ұсын.",
+            3000,
+            min_chars=10
+        )
+        return {"objective": objective.strip()}
+    except Exception as e:
+        app.logger.exception("Objective generation failed")
+        return {"error": "Оқу мақсатын жасау қатесі: " + str(e)[:150]}, 500
 
 
 @app.route("/ai-tools/worksheet", methods=["GET", "POST"])

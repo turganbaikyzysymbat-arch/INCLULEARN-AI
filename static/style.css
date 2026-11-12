@@ -276,7 +276,7 @@ body{font-size:16px!important;color:#242238!important;background:#fbf9fd!importa
 /* 6.2 FINAL — vivid landing page, balanced adaptation workspace, no floating dock */
 :root{--ink:#211b38;--muted:#69627c;--brand:#7650df;--teal:#12a99a;--line:#e5deef}
 .app-dock{display:none!important}
-.sidebar .side-nav a[href="/textbooks"],.sidebar .side-nav a[href="/analytics"]{display:none!important}
+.sidebar .side-nav a[href="/textbooks"]{display:none!important}
 .quick-grid-two{grid-template-columns:repeat(2,minmax(0,1fr));max-width:900px}
 .landing-hero{position:relative;overflow:hidden;background:linear-gradient(118deg,#fff0e8 0%,#f1eaff 48%,#e4f8f0 100%);border-radius:34px;padding:76px 6%;box-shadow:0 24px 65px #7054b51b}
 .landing-hero:before,.landing-hero:after{content:"";position:absolute;border-radius:50%;pointer-events:none}
@@ -778,4 +778,27 @@ body{font-size:16px!important;color:#242238!important;background:#fbf9fd!importa
 
 .material-tab-panel.reading-contrast * {
     color: #161616 !important;
+}
+
+/* Кестелердің шекараларын көрсету */
+table {
+    width: 100%;
+    border-collapse: collapse !important;
+    border: 1px solid #d8d3e5 !important;
+}
+
+table th,
+table td {
+    border: 1px solid #d8d3e5 !important;
+    padding: 12px !important;
+    vertical-align: middle;
+}
+
+table th {
+    background: #f3f0fa;
+    font-weight: 700;
+}
+
+table tbody tr:nth-child(even) {
+    background: #faf9fd;
 }

@@ -24,11 +24,11 @@
             <div class="form-grid">
                 <label>
                     Сабақ тақырыбы
-                    <input type="text" name="title" required placeholder="Мысалы: Алгоритмдер">
+                    <input type="text" id="objective-title" name="title" required placeholder="Мысалы: Алгоритмдер">
                 </label>
                 <label>
                     Сынып
-                    <select name="grade">
+                    <select name="grade" id="objective-grade">
                         {% for g in range(1,12) %}
                         <option value="{{ g }}" {% if g == 7 %}selected{% endif %}>{{ g }}-сынып</option>
                         {% endfor %}
@@ -36,7 +36,7 @@
                 </label>
                 <label>
                     Пән
-                    <select name="subject">
+                    <select name="subject" id="objective-subject">
                         {% for s in subjects %}
                         <option value="{{ s }}" {% if s == 'Информатика' %}selected{% endif %}>{{ s }}</option>
                         {% endfor %}
@@ -44,7 +44,9 @@
                 </label>
                 <label class="full-width">
                     Оқу мақсаты және тақырып туралы мәлімет
-                    <textarea name="topic" rows="4" required placeholder="Оқу мақсатын және оқушы нені меңгеруі керектігін жазыңыз..."></textarea>
+                    <textarea name="topic" id="objective-topic" rows="4" required placeholder="AI ұсынған оқу мақсатын осында көресіз. Қажет болса, өңдеңіз..."></textarea>
+                    <button type="button" id="generate-objective" class="secondary-btn" style="margin-top:10px;">✧ AI оқу мақсатын ұсыну</button>
+                    <p id="objective-status" role="status" aria-live="polite"></p>
                 </label>
 
                 {% if is_worksheet %}
@@ -96,4 +98,47 @@
     </section>
     {% endif %}
 </section>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const button = document.getElementById("generate-objective");
+    if (!button) return;
+
+    button.addEventListener("click", async function () {
+        const title = document.getElementById("objective-title").value.trim();
+        const grade = document.getElementById("objective-grade").value;
+        const subject = document.getElementById("objective-subject").value;
+        const topic = document.getElementById("objective-topic");
+        const status = document.getElementById("objective-status");
+
+        if (title.length < 2) {
+            status.textContent = "Алдымен сабақ тақырыбын енгізіңіз.";
+            return;
+        }
+
+        button.disabled = true;
+        button.textContent = "AI оқу мақсатын құрастырып жатыр...";
+        status.textContent = "Күте тұрыңыз...";
+
+        try {
+            const response = await fetch("/generate-objective", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({title, grade, subject})
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || "Қате орын алды.");
+
+            topic.value = data.objective;
+            status.textContent = "Оқу мақсаты дайын. Қажет болса, өңдей аласыз.";
+        } catch (error) {
+            status.textContent = error.message;
+        } finally {
+            button.disabled = false;
+            button.textContent = "✧ AI оқу мақсатын ұсыну";
+        }
+    });
+});
+</script>
+
 {% endblock %}

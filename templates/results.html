@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-wrap">
+    <div class="page-heading">
+        <span class="eyebrow">INCLUDELEARN AI</span>
+        <h1>Оқушылар нәтижелері</h1>
+        <p>Оқушылардың тапсырмалары мен ойын нәтижелері</p>
+    </div>
+
+    <section class="content-card">
+        <h2>Орындалған тапсырмалар</h2>
+        {% if submissions %}
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Оқушы</th>
+                        <th>Тапсырма</th>
+                        <th>Пән</th>
+                        <th>Жауабы</th>
+                        <th>AI пікірі</th>
+                        <th>Мұғалім бағасы</th>
+                        <th>Күні</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in submissions %}
+                    <tr>
+                        <td>{{ item.student_name }}</td>
+                        <td>{{ item.material_title }}</td>
+                        <td>{{ item.subject or '—' }}</td>
+                        <td>{{ item.answer or '—' }}</td>
+                        <td>{{ item.ai_feedback or 'Әлі тексерілмеген' }}</td>
+                        <td>{{ item.teacher_score if item.teacher_score is not none else '—' }}</td>
+                        <td>{{ item.created_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>Әзірге орындалған тапсырмалар жоқ.</p>
+        {% endif %}
+    </section>
+
+    <section class="content-card" style="margin-top:24px;">
+        <h2>Quiz және ойын нәтижелері</h2>
+        {% if game_results %}
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Оқушы</th>
+                        <th>Ойын атауы</th>
+                        <th>Пән</th>
+                        <th>Ұпай</th>
+                        <th>Нәтиже</th>
+                        <th>Мұғалім бағасы</th>
+                        <th>Күні</th>
+                        <th>Әрекет</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in game_results %}
+                    <tr>
+                        <td>{{ item.student_name }}</td>
+                        <td>
+
+    {{ item.game_type_name }}
+</td>
+                        <td>{{ item.subject or '—' }}</td>
+                        <td>{{ item.score }} / {{ item.total }}</td>
+                        <td>{{ (item.score * 100 / item.total)|round|int if item.total > 0 else 0 }}%</td>
+                        <td>
+                            {% if item.teacher_score is not none %}
+                                {{ item.teacher_score }} / 10
+                            {% endif %}
+                            <form method="POST" action="{{ url_for('review_game_result', result_id=item.id) }}">
+                                <input type="number" name="teacher_score" min="0"
+                                       max="10" step="0.5"
+                                       value="{{ item.teacher_score if item.teacher_score is not none else '' }}"
+                                       placeholder="Баға" required
+                                       style="width:85px;padding:7px;">
+                                <button type="submit" class="primary-btn">Сақтау</button>
+                            </form>
+                        </td>
+                        <td>{{ item.created_at }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('delete_game_result', result_id=item.id) }}"
+                                  onsubmit="return confirm('Осы ойын нәтижесін өшіргіңіз келе ме?');">
+                                <button type="submit" class="secondary-btn">Өшіру</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p>Әзірге ойын нәтижелері жоқ.</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

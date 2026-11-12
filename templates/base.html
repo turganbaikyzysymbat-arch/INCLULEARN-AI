@@ -6,8 +6,12 @@
 {% if session.role in ['teacher','admin'] %}<a href="/ai-tools" class="{{'active' if request.endpoint in ['ai_tools','worksheet','visual_learning','learner_levels'] else ''}}"><i>✧</i> AI Tools</a>{% endif %}
 <a href="/materials"><i>▧</i> Материалдар</a>
 
-<a href="/assistant"><i>✧</i> AI көмекші</a>
+<a href="/adapt"><i>✧</i> AI көмекші</a>
 <a href="/tasks"><i>◷</i> Тапсырмалар</a>
+{% if session.role in ['teacher', 'admin'] %}
+<a href="{{ url_for('analytics') }}" class="{{ 'active' if request.endpoint == 'analytics' else '' }}"><i>▥</i> Оқу аналитикасы</a>
+<a href="{{ url_for('results') }}"><i>▤</i> Нәтижелер</a>
+{% endif %}
 {% if session.role=='admin' %}<a href="/admin"><i>⚙</i> Әкімші панелі</a>{% endif %}
 </nav><div class="side-bottom"><a class="side-user" href="/logout"><span class="avatar">{{session.name[:1]|upper}}</span><span><b>{{session.name}}</b><small>{{'Мұғалім' if session.role=='teacher' else 'Оқушы' if session.role=='student' else 'Әкімші'}}</small></span><span class="logout">↗</span></a></div></aside>
 {% endif %}
